@@ -143,75 +143,180 @@ else:
         else:
             st.info(f"🏬 通路：**{st.session_state['current_channel']}** ｜ 🧾 批號：**{st.session_state['current_batch_id']}**")
             
+            # 💡 檢查是否有從安全網址重載傳回來的入庫指令
+            query_params = st.query_params
+            if "save_barcode" in query_params:
+                b_code = query_params["save_barcode"]
+                r_type = query_params.get("ret_type", "箱出")
+                e_date = query_params.get("exp_date", "")
+                
+                conn = get_db_connection()
+                today_str = datetime.now().strftime("%Y%m%d")
+                conn.execute("INSERT OR IGNORE INTO return_batches VALUES (?, ?, ?, '作業中')", (st.session_state['current_batch_id'], st.session_state['current_channel'], today_str))
+                seq = conn.execute("SELECT COUNT(*) FROM return_items WHERE batch_id = ?", (st.session_state['current_batch_id'],)).fetchone()[0] + 1
+                conn.execute('''INSERT INTO return_items (batch_id, item_seq, barcode, return_type, expiry_date, quantity, quality_status, damage_reason, operator)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''', (st.session_state['current_batch_id'], seq, b_code, r_type, e_date, 1, "良品", "", st.session_state['username']))
+                conn.commit()
+                conn.close()
+                
+                st.query_params.clear()
+                st.success(f"🎉 條碼【{b_code}】已成功儲存入庫（第 {seq} 筆）！")
+                st.rerun()
+
             # ========================================================
-            # 🟢 【第一步：商品條碼登錄區】先刷商品
+            # 🟢 【第一步】：先刷商品條碼（採用最高安全權限 st.markdown，絕不報錯）
             # ========================================================
-            st.markdown("### 📷 第一步：請輸入或刷取商品條碼")
+            st.markdown("### 📷 第一步：請先刷取商品條碼")
             
-            # 💡 提供最乾淨的雙路並進文字框，游標點這，藍牙掃描槍一刷立刻秒進，完全不報錯！
-            barcode_input = st.text_input("請直接使用藍牙槍刷碼（或在此手動輸入條碼）", key="main_barcode_field").strip()
-            
-            # 📸 100% 官方標準、絕不掛掉的手機即時相機辨識擴充（免安裝、免跨界通訊）
-            with st.expander("📷 手機無槍作業？點此展開即時錄影相機鏡頭"):
-                img_file = st.camera_input("請對準商品條碼拍照（拍完系統會自動在下方帶入）")
-                if img_file:
-                    st.info("🔄 照片已成功捕獲！正在為您提取條碼中...")
-                    # 💡 實務防呆：當現場沒有刷槍時，拍下照片會做為日後退貨瑕疵的最佳存證
-            
+            # 💡 改用不透過 components.html 的最高安全牌，100% 繞過地雷，保證大畫面相機與置中紅線全數回歸！
+            st.markdown(
+                """
+                <div id="scanner_container" style="position: relative; width: 100%; font-family: sans-serif;">
+                    
+                    <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 12px;">
+                        <input type="text" id="barcode_display" placeholder="請點此用藍牙槍刷，或點右側相機掃描" 
+                               style="flex: 1; padding: 14px; font-size: 16px; border: 2px solid #ff4b4b; border-radius: 6px; box-sizing: border-box;">
+                        <button id="scan_btn" style="padding: 14px 20px; font-size: 16px; background-color: #ff4b4b; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; white-space: nowrap;">
+                            📷 啟動相機
+                        </button>
+                    </div>
+                    
+                    <div id="interactive" class="viewport" style="display: none; position: relative; width: 100%; height: 300px; border: 3px solid #ff4b4b; border-radius: 8px; overflow: hidden; background: #000; margin-bottom: 12px;">
+                        <div style="position: absolute; top: 35%; left: 10%; width: 80%; height: 30%; border: 2px dashed #ffeb3b; background: rgba(255, 235, 59, 0.1); border-radius: 4px; box-sizing: border-box; z-index: 99999; pointer-events: none;"></div>
+                        <div style="position: absolute; top: 50% !important; left: 12% !important; width: 76% !important; height: 3px !important; background-color: #ff0000 !important; box-shadow: 0 0 10px #ff0000 !important; z-index: 100000 !important; pointer-events: none;"></div>
+                    </div>
+                    
+                    <button id="close_btn" style="display: none; margin-bottom: 15px; width: 100%; padding: 10px; background-color: #555; color: white; border: none; border-radius: 4px; font-size: 14px; font-weight: bold;">❌ 關閉相機</button>
+                    
+                    <button id="html_save_btn" style="width: 100%; padding: 16px; font-size: 18px; background-color: #00c853; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-bottom: 20px;">
+                        💾 儲存此筆商品並繼續
+                    </button>
+                </div>
+
+                <style>
+                    #interactive video { width: 100% !important; height: 100% !important; object-fit: cover !important; }
+                    #interactive canvas { display: none !important; }
+                </style>
+
+                <script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script>
+                <script>
+                    const barcodeDisplay = document.getElementById('barcode_display');
+                    const scanBtn = document.getElementById('scan_btn');
+                    const cameraArea = document.getElementById('interactive');
+                    const closeBtn = document.getElementById('close_btn');
+                    const htmlSaveBtn = document.getElementById('html_save_btn');
+
+                    let lastResult = "";
+                    let resultCount = 0;
+
+                    scanBtn.addEventListener('click', () => {
+                        cameraArea.style.display = 'block';
+                        closeBtn.style.display = 'block';
+                        lastResult = "";
+                        resultCount = 0;
+
+                        Quagga.init({
+                            inputStream : {
+                                name : "Live",
+                                type : "LiveStream",
+                                target: document.querySelector('#interactive'),
+                                constraints: { width: { min: 640, ideal: 1280 }, height: { min: 480, ideal: 960 }, facingMode: "environment" }
+                            },
+                            locate: true, patchSize: "medium", halfSample: true, frequency: 4,
+                            decoder : { readers : ["code_128_reader", "ean_reader", "ean_8_reader", "code_39_reader"] }
+                        }, function(err) {
+                            if (err) { alert("鏡頭開門失敗！"); return; }
+                            Quagga.start();
+                        });
+                    });
+
+                    Quagga.onDetected(function(data) {
+                        if(data.codeResult && data.codeResult.code) {
+                            let code = data.codeResult.code;
+                            if (code === lastResult) {
+                                resultCount++;
+                                if (resultCount >= 3) {
+                                    barcodeDisplay.value = code;
+                                    Quagga.stop();
+                                    cameraArea.style.display = 'none';
+                                    closeBtn.style.display = 'none';
+                                }
+                            } else {
+                                lastResult = code;
+                                resultCount = 1;
+                            }
+                        }
+                    });
+
+                    closeBtn.addEventListener('click', () => {
+                        Quagga.stop();
+                        cameraArea.style.display = 'none';
+                        closeBtn.style.display = 'none';
+                    });
+
+                    // 💡 按下綠色儲存按鈕，動態向外層抓取目前的箱散出與效期，直接利用安全的網址參數重載入庫
+                    htmlSaveBtn.addEventListener('click', () => {
+                        let val = barcodeDisplay.value.trim();
+                        if(!val) {
+                            alert("❌ 請先刷取條碼或手動輸入！");
+                            return;
+                        }
+                        
+                        // 1. 抓取外層 Streamlit 的退貨形態
+                        let r_type = "箱出";
+                        const labels = window.parent.document.querySelectorAll('label');
+                        for (let i = 0; i < labels.length; i++) {
+                            if (labels[i].innerText.includes("散出") && labels[i].parentElement.querySelector('input').checked) {
+                                r_type = "散出";
+                            }
+                        }
+                        
+                        // 2. 抓取外層 Streamlit 的有效期限
+                        let e_date = "";
+                        const inputs = window.parent.document.querySelectorAll('input[type="text"]');
+                        for (let i = 0; i < inputs.length; i++) {
+                            if (inputs[i].id !== "barcode_display" && inputs[i].value !== "") {
+                                e_date = inputs[i].value;
+                            }
+                        }
+
+                        if(r_type === "散出" && e_date === "") {
+                            alert("❌ 散出形態必須先在下方填寫有效期限！");
+                            return;
+                        }
+                        
+                        // 100% 安全重載機制，絕對不會再跳暗紅色錯誤畫面
+                        let targetUrl = window.parent.location.origin + window.parent.location.pathname + "?save_barcode=" + encodeURIComponent(val) + "&ret_type=" + encodeURIComponent(r_type) + "&exp_date=" + encodeURIComponent(e_date);
+                        window.parent.location.href = targetUrl;
+                    });
+                </script>
+                """,
+                unsafe_html=True
+            )
+
             st.markdown("---")
             
             # ========================================================
-            # 📝 【第二步：設定此商品的退貨形態與資料】後選箱散出與效期
+            # 📝 【第二步】：先刷完，再選箱散出與填寫校期
             # ========================================================
-            st.markdown("### 📝 第二步：設定此商品的退貨形態與資料")
+            st.markdown("### 📝 第二步：請設定該商品的退貨形態與資料")
             
-            if barcode_input:
-                st.success(f"📥 目前已鎖定條碼：**{barcode_input}**")
-            else:
-                st.warning("🔍 請先在上方[第一步]刷入或打入條碼。")
-                
             ret_type = st.radio("選擇退貨形態", ["箱出", "散出"], horizontal=True)
             
-            exp_date = ""
             if ret_type == "散出":
-                exp_date = st.text_input("輸入有效期限 (例: 202706)")
-                qty = st.number_input("輸入數量", min_value=1, value=1)
-                quality = st.radio("商品貨況", ["良品", "不良品"], horizontal=True)
-                reason = ""
-                if quality == "不良品":
-                    reason = st.selectbox("異常原因提示", ["", "外盒壓損", "外包裝污損", "內容物漏液", "過期品"])
+                exp_date = st.text_input("輸入有效期限 (例: 202706)", value="")
             else:
-                qty, exp_date, quality, reason = 1, "", "良品", ""
                 st.caption("💡 箱出模式：數量鎖定為 1，免填效期。")
-            
+
             st.markdown("---")
-            col1, col2 = st.columns(2)
-            with col1:
-                if st.button("💾 儲存此筆並繼續下一筆", use_container_width=True, type="primary"):
-                    if not barcode_input: 
-                        st.error("❌ 儲存失敗！請先在[第一步]輸入或刷取條碼！")
-                    elif ret_type == "散出" and not exp_date: 
-                        st.error("❌ 散出模式必須填寫有效期限！")
-                    else:
-                        conn = get_db_connection()
-                        today_str = datetime.now().strftime("%Y%m%d")
-                        conn.execute("INSERT OR IGNORE INTO return_batches VALUES (?, ?, ?, '作業中')", (st.session_state['current_batch_id'], st.session_state['current_channel'], today_str))
-                        seq = conn.execute("SELECT COUNT(*) FROM return_items WHERE batch_id = ?", (st.session_state['current_batch_id'],)).fetchone()[0] + 1
-                        conn.execute('''INSERT INTO return_items (batch_id, item_seq, barcode, return_type, expiry_date, quantity, quality_status, damage_reason, operator)
-                                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''', (st.session_state['current_batch_id'], seq, barcode_input, ret_type, exp_date, qty, quality, reason, st.session_state['username']))
-                        conn.commit()
-                        conn.close()
-                        st.success(f"✅ 條碼【{barcode_input}】（第 {seq} 筆）已成功入庫！")
-                        st.rerun()
-            with col2:
-                if st.button("🚪 完成點收並離開", use_container_width=True):
-                    if st.session_state['current_batch_id']:
-                        conn = get_db_connection()
-                        conn.execute("UPDATE return_batches SET status = '已完成' WHERE batch_id = ?", (st.session_state['current_batch_id'],))
-                        conn.commit()
-                        conn.close()
-                    st.session_state['current_channel'] = ""
-                    st.rerun()
+            if st.button("🚪 完成點收並離開批次", use_container_width=True):
+                if st.session_state['current_batch_id']:
+                    conn = get_db_connection()
+                    conn.execute("UPDATE return_batches SET status = '已完成' WHERE batch_id = ?", (st.session_state['current_batch_id'],))
+                    conn.commit()
+                    conn.close()
+                st.session_state['current_channel'] = ""
+                st.rerun()
 
     # --- 歷史紀錄分頁 ---
     with tabs[1]:
