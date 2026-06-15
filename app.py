@@ -11,7 +11,7 @@ st.set_page_config(page_title="物流退貨點收系統", layout="centered")
 ORIGINAL_ADMIN = "余宸緯" 
 
 # ==========================================
-# 💡 雲端專用：自動初始化資料庫
+# 💡 自動初始化資料庫
 # ==========================================
 def init_db_if_not_exists():
     conn = sqlite3.connect('return_system.db')
@@ -43,10 +43,7 @@ def init_db_if_not_exists():
             quantity INTEGER,
             quality_status TEXT,
             damage_reason TEXT,
-            operator TEXT,
-            approval_status TEXT DEFAULT '已確認',
-            new_quantity INTEGER,
-            new_damage_reason TEXT
+            operator TEXT
         )
     ''')
     conn.commit()
@@ -151,11 +148,24 @@ else:
             
             st.markdown("**📷 即時鏡頭掃碼登錄區**")
             
-            # 💡 【核心重裝】：使用官方 v1.html 配合完美授權，強制手機彈出鏡頭權限！
+            # 💡 【終極修正】：透過 CSS 將 Quagga 產生的錄影視訊強制與手機螢幕 100% 貼合，防閃退！
             components.html(
                 """
+                <style>
+                    /* 強制鎖定相機元件尺寸，使其完美適應手機畫面 */
+                    #interactive video {
+                        width: 100% !important;
+                        height: auto !important;
+                        max-width: 100%;
+                        display: block;
+                    }
+                    #interactive canvas {
+                        display: none !important; /* 隱藏除錯用重疊圖層，減輕手機運算負擔 */
+                    }
+                </style>
+                
                 <div style="display: flex; gap: 8px; align-items: center; font-family: sans-serif;">
-                    <input type="text" id="barcode_display" placeholder="請手動輸入、藍牙槍或等待鏡頭嗶聲" 
+                    <input type="text" id="barcode_display" placeholder="手動、藍牙槍或等待相機嗶聲" 
                            style="flex: 1; padding: 10px; font-size: 16px; border: 1px solid #ccc; border-radius: 4px;">
                     <button id="scan_btn" style="padding: 10px 16px; font-size: 16px; background-color: #ff4b4b; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">
                         📷 啟動掃碼
@@ -163,11 +173,11 @@ else:
                 </div>
                 
                 <div id="camera_modal" style="display: none; position: fixed; top:0; left:0; width:100vw; height:100vh; background: rgba(0,0,0,0.9); z-index: 99999; flex-direction: column; justify-content: center; align-items: center;">
-                    <div style="position: relative; width: 85%; max-width: 360px;">
-                        <div id="interactive" class="viewport" style="width: 100%; border: 2px solid #fff; border-radius: 8px; overflow: hidden;"></div>
+                    <div style="position: relative; width: 90%; max-width: 360px;">
+                        <div id="interactive" class="viewport" style="width: 100%; border: 2px solid #fff; border-radius: 8px; overflow: hidden; background: #000;"></div>
                         <div style="position: absolute; top: 50%; left: 5%; width: 90%; height: 2px; background-color: red; box-shadow: 0 0 8px red; pointer-events: none;"></div>
                     </div>
-                    <button id="close_cam" style="margin-top: 15px; padding: 10px 20px; background: #666; color: white; border: none; border-radius: 4px; font-size: 16px;">❌ 關閉相機</button>
+                    <button id="close_cam" style="margin-top: 20px; padding: 12px 24px; background: #555; color: white; border: none; border-radius: 4px; font-size: 16px; font-weight: bold;">❌ 關閉相機</button>
                 </div>
 
                 <script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script>
@@ -177,7 +187,6 @@ else:
                     const cameraModal = document.getElementById('camera_modal');
                     const closeCam = document.getElementById('close_cam');
 
-                    // 監聽手動輸入傳回 Streamlit
                     barcodeDisplay.addEventListener('input', (e) => {
                         window.parent.postMessage({type: 'streamlit:setComponentValue', value: e.target.value}, '*');
                     });
@@ -189,12 +198,17 @@ else:
                                 name : "Live",
                                 type : "LiveStream",
                                 target: document.querySelector('#interactive'),
-                                constraints: { width: 640, height: 480, facingMode: "environment" }
+                                constraints: {
+                                    // 💡 改用符合多數手機自適應的標準物流尺寸
+                                    width: { min: 320, max: 640 },
+                                    height: { min: 240, max: 480 },
+                                    facingMode: "environment"
+                                }
                             },
                             decoder : { readers : ["code_128_reader", "ean_reader", "ean_8_reader", "code_39_reader"] }
                         }, function(err) {
                             if (err) { 
-                                alert("相機啟動失敗！請確保手機已允許網頁的相機權限！"); 
+                                alert("相機啟動失敗，請重新整理並允許權限！"); 
                                 cameraModal.style.display = 'none'; 
                                 return; 
                             }
@@ -206,7 +220,6 @@ else:
                         if(data.codeResult && data.codeResult.code) {
                             let code = data.codeResult.code;
                             barcodeDisplay.value = code;
-                            // 核心傳遞：秒傳回 Streamlit 的變數中
                             window.parent.postMessage({type: 'streamlit:setComponentValue', value: code}, '*');
                             Quagga.stop();
                             cameraModal.style.display = 'none';
@@ -222,10 +235,10 @@ else:
                 height=65,
             )
             
-            # 接收 HTML 傳回來的條碼數值
+            # 接收 HTML 變數數值
             barcode_input = st.session_state.get('barcode_field', '').strip()
             
-            # 多放一個官方輸入框做最後確認防呆
+            # 輔助的最後確認欄位
             final_barcode = st.text_input("最終確認條碼（可在此手動修正或由上方相機帶入）", value=barcode_input)
 
             st.markdown("---")
