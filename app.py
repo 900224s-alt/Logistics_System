@@ -8,7 +8,55 @@ import streamlit.components.v1 as components
 st.set_page_config(page_title="物流退貨點收系統", layout="centered")
 
 # 💡 【核心設定】請在這裡輸入您的真實中文姓名！
-ORIGINAL_ADMIN = "余宸緯" 
+ORIGINAL_ADMIN = "Admin999" 
+
+# ==========================================
+# 💡 雲端專用：防呆自動初始化資料庫
+# ==========================================
+def init_db_if_not_exists():
+    conn = sqlite3.connect('return_system.db')
+    cursor = conn.cursor()
+    # 1. 建立使用者資料表
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            username TEXT PRIMARY KEY,
+            password TEXT NOT NULL,
+            register_date TEXT,
+            role TEXT DEFAULT '一般用戶'
+        )
+    ''')
+    # 2. 建立退貨批次主檔
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS return_batches (
+            batch_id TEXT PRIMARY KEY,
+            channel_name TEXT,
+            create_date TEXT,
+            status TEXT DEFAULT '作業中'
+        )
+    ''')
+    # 3. 建立退貨商品明細檔
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS return_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            batch_id TEXT,
+            item_seq INTEGER,
+            barcode TEXT,
+            return_type TEXT,
+            expiry_date TEXT,
+            quantity INTEGER,
+            quality_status TEXT,
+            damage_reason TEXT,
+            operator TEXT,
+            approval_status TEXT DEFAULT '已確認',
+            new_quantity INTEGER,
+            new_damage_reason TEXT
+        )
+    ''')
+    conn.commit()
+    conn.close()
+
+# 每次網頁載入時都執行檢查，確保雲端廚房絕對有蓋好
+init_db_if_not_exists()
 
 def get_db_connection():
     conn = sqlite3.connect('return_system.db')
@@ -58,7 +106,7 @@ if not st.session_state['logged_in']:
             if reg_name and reg_pwd:
                 conn = get_db_connection()
                 try:
-                    initial_role = "管理者" if reg_name == ORIGINAL_ADMIN else "一般用戶"
+                    initial_role = "管理者" if reg_name == ORIGINAL_ADMIN or reg_name == "余宸緯" else "一般用戶"
                     conn.execute('INSERT INTO users (username, password, register_date, role) VALUES (?, ?, ?, ?)', 
                                  (reg_name, reg_pwd, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), initial_role))
                     conn.commit()
@@ -123,8 +171,6 @@ else:
             st.markdown(f"### {env_label}")
             st.info(f"🏬 通路：**{st.session_state['current_channel']}** ｜ 🧾 預計批號：**{st.session_state['current_batch_id']}**")
             
-            # 💡 【完全重現截圖功能】：高階原生一體化掃碼按鈕晶片
-            # 畫面上只會留下乾淨的欄位與按鈕，點擊按鈕時才會彈出獨立的滿版相機視窗，逼真重現實務感！
             st.markdown("**🔍 商品條碼登錄**")
             components.html(
                 """
@@ -152,15 +198,12 @@ else:
                     const cameraModal = document.getElementById('camera_modal');
                     const closeCam = document.getElementById('close_cam');
 
-                    // 當手打或藍牙槍輸入時，即時把值往上傳給系統主程式
                     barcodeDisplay.addEventListener('input', (e) => {
                         window.parent.postMessage({type: 'streamlit:setComponentValue', value: e.target.value}, '*');
                     });
 
                     scanBtn.addEventListener('click', () => {
                         cameraModal.style.display = 'flex';
-                        
-                        // 啟動專門為手機鏡頭優化的掃碼引擎
                         Quagga.init({
                             inputStream : {
                                 name : "Live",
@@ -170,19 +213,16 @@ else:
                             },
                             decoder : { readers : ["code_128_reader", "ean_reader", "ean_8_reader", "code_39_reader"] }
                         }, function(err) {
-                            if (err) { alert("相機啟動失敗，請確認是否允許權限或使用藍牙槍！"); cameraModal.style.display = 'none'; return; }
+                            if (err) { alert("相機啟動失敗！"); cameraModal.style.display = 'none'; return; }
                             Quagga.start();
                         });
                     });
 
-                    // 嗶一聲成功感應後
                     Quagga.onDetected(function(data) {
                         if(data.codeResult && data.codeResult.code) {
                             let code = data.codeResult.code;
-                            barcodeDisplay.value = code; // 帶入文字框
-                            window.parent.postMessage({type: 'streamlit:setComponentValue', value: code}, '*'); // 傳回系統
-                            
-                            // 自動關閉相機，恢復乾淨畫面
+                            barcodeDisplay.value = code;
+                            window.parent.postMessage({type: 'streamlit:setComponentValue', value: code}, '*');
                             Quagga.stop();
                             cameraModal.style.display = 'none';
                         }
@@ -196,7 +236,6 @@ else:
                 """, height=65,
             )
             
-            # 主程式接收區
             barcode_input = st.session_state.get('barcode_field', '')
             if barcode_input:
                 st.success(f"📥 目前帶入條碼：**{barcode_input}**")
@@ -226,7 +265,6 @@ else:
                     elif ret_type == "散出" and not exp_date: st.error("❌ 散出必須填寫效期！")
                     else:
                         conn = get_db_connection()
-                        
                         if not st.session_state['is_batch_saved']:
                             today_str = datetime.now().strftime("%Y%m%d")
                             conn.execute("INSERT OR IGNORE INTO return_batches VALUES (?, ?, ?, '作業中')", 
