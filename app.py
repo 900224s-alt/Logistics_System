@@ -144,38 +144,14 @@ else:
         else:
             st.info(f"🏬 通路：**{st.session_state['current_channel']}** ｜ 🧾 批號：**{st.session_state['current_batch_id']}**")
             
-            # 💡 檢查安全網址參數，直接寫入資料庫
-            query_params = st.query_params
-            if "save_barcode" in query_params:
-                b_code = query_params["save_barcode"]
-                r_type = query_params.get("ret_type", "箱出")
-                e_date = query_params.get("exp_date", "")
-                q_status = query_params.get("quality", "良品")
-                d_reason = query_params.get("reason", "")
-                
-                conn = get_db_connection()
-                today_str = datetime.now().strftime("%Y%m%d")
-                conn.execute("INSERT OR IGNORE INTO return_batches VALUES (?, ?, ?, '作業中')", (st.session_state['current_batch_id'], st.session_state['current_channel'], today_str))
-                seq = conn.execute("SELECT COUNT(*) FROM return_items WHERE batch_id = ?", (st.session_state['current_batch_id'],)).fetchone()[0] + 1
-                conn.execute('''INSERT INTO return_items (batch_id, item_seq, barcode, return_type, expiry_date, quantity, quality_status, damage_reason, operator)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''', (st.session_state['current_batch_id'], seq, b_code, r_type, e_date, 1, q_status, d_reason, st.session_state['username']))
-                conn.commit()
-                conn.close()
-                
-                st.query_params.clear()
-                st.success(f"🎉 條碼【{b_code}】已成功入庫（第 {seq} 筆）！")
-                st.rerun()
-
             # ========================================================
-            # 🟢 物流現場最愛工作流：先刷條碼 ➔ 自由選擇退貨型態與儲存
+            # 🟢 【第一步】：先刷商品條碼（絕不變灰、絕不報錯的標準官方雙向接口）
             # ========================================================
-            st.markdown("### 📷 請先刷取或輸入商品條碼")
+            st.markdown("### 📷 第一步：請先刷取商品條碼")
             
-            # 💡 【核心重裝】：改回官方唯一安全、絕對不變灰也不爆錯的 components.html 機制
-            # 並且把儲存動作整合進去，不碰觸外層 window.parent 防護機制，100% 滿血復活！
-            components.html(
+            html_value = components.html(
                 """
-                <div id="scanner_container" style="width: 100%; font-family: sans-serif;">
+                <div id="scanner_container" style="position: relative; width: 100%; font-family: sans-serif;">
                     <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 12px;">
                         <input type="text" id="barcode_display" placeholder="請點此用藍牙槍刷，或點右側相機掃描" 
                                style="flex: 1; padding: 14px; font-size: 16px; border: 2px solid #ff4b4b; border-radius: 6px; box-sizing: border-box;">
@@ -184,38 +160,23 @@ else:
                         </button>
                     </div>
                     
-                    <div id="interactive" class="viewport" style="display: none; position: relative; width: 100%; height: 300px; border: 3px solid #ff4b4b; border-radius: 8px; overflow: hidden; background: #000; margin-bottom: 15px;">
+                    <div id="interactive" class="viewport" style="display: none; position: relative; width: 100%; height: 320px; border: 3px solid #ff4b4b; border-radius: 8px; overflow: hidden; background: #000; margin-bottom: 10px;">
                         <div style="position: absolute; top: 35%; left: 10%; width: 80%; height: 30%; border: 2px dashed #ffeb3b; background: rgba(255, 235, 59, 0.1); border-radius: 4px; box-sizing: border-box; z-index: 99999; pointer-events: none;"></div>
                         <div style="position: absolute; top: 50% !important; left: 12% !important; width: 76% !important; height: 3px !important; background-color: #ff0000 !important; box-shadow: 0 0 10px #ff0000 !important; z-index: 100000 !important; pointer-events: none;"></div>
                     </div>
+                    
                     <button id="close_btn" style="display: none; margin-bottom: 15px; width: 100%; padding: 10px; background-color: #555; color: white; border: none; border-radius: 4px; font-size: 14px; font-weight: bold;">❌ 關閉相機</button>
-                    
-                    <hr style="border: 0; border-top: 1px solid #ccc; margin: 20px 0;">
-                    
-                    <h3 style="color: #333; margin-bottom: 8px;">📝 請設定該商品的退貨型態並點擊儲存：</h3>
-                    
-                    <div id="exp_area" style="margin-bottom: 15px;">
-                        <label style="font-size: 14px; font-weight: bold; color: #555;">輸入有效期限 (散出模式必填，例: 202706)</label>
-                        <input type="text" id="html_exp" placeholder="例: 202706" style="width: 100%; padding: 10px; margin-top: 5px; font-size: 14px; border: 1px solid #ccc; border-radius: 4px;">
-                    </div>
-                    
-                    <div id="reason_area" style="margin-bottom: 20px;">
-                        <label style="font-size: 14px; font-weight: bold; color: #555;">異常原因備註 (僅在[不良品]時有效)</label>
-                        <select id="html_reason" style="width: 100%; padding: 10px; margin-top: 5px; font-size: 14px; border: 1px solid #ccc; border-radius: 4px;">
-                            <option value="">-- 無異常原因 --</option>
-                            <option value="外盒壓損">外盒壓損</option>
-                            <option value="外包裝污損">外包裝污損</option>
-                            <option value="內容物漏液">內容物漏液</option>
-                            <option value="過期品">過期品</option>
-                        </select>
-                    </div>
-
-                    <div style="display: grid; grid-template-columns: 1fr; gap: 10px;">
-                        <button id="btn_box" style="padding: 14px; font-size: 16px; background-color: #00c853; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer;">🟢 儲存為【良品 - 箱出】</button>
-                        <button id="btn_loose" style="padding: 14px; font-size: 16px; background-color: #29b6f6; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer;">🔵 儲存為【良品 - 散出】</button>
-                        <button id="btn_damage" style="padding: 14px; font-size: 16px; background-color: #ff5252; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer;">🔴 儲存為【不良品 - 散出】</button>
-                    </div>
                 </div>
+
+                <style>
+                    /* 💡 徹底移除 object-fit: cover 放大，回歸 100% 標準比例，位置最好抓 */
+                    #interactive video { 
+                        width: 100% !important; 
+                        height: 100% !important; 
+                        object-fit: contain !important; 
+                    }
+                    #interactive canvas { display: none !important; }
+                </style>
 
                 <script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script>
                 <script>
@@ -223,20 +184,23 @@ else:
                     const scanBtn = document.getElementById('scan_btn');
                     const cameraArea = document.getElementById('interactive');
                     const closeBtn = document.getElementById('close_btn');
-                    
-                    const btnBox = document.getElementById('btn_box');
-                    const btnLoose = document.getElementById('btn_loose');
-                    const btnDamage = document.getElementById('btn_damage');
-                    const htmlExp = document.getElementById('html_exp');
-                    const htmlReason = document.getElementById('html_reason');
 
                     let lastResult = "";
                     let resultCount = 0;
+
+                    function sendToStreamlit(val) {
+                        window.parent.postMessage({ type: 'streamlit:setComponentValue', value: val }, '*');
+                    }
+
+                    barcodeDisplay.addEventListener('input', (e) => {
+                        sendToStreamlit(e.target.value);
+                    });
 
                     scanBtn.addEventListener('click', () => {
                         cameraArea.style.display = 'block';
                         closeBtn.style.display = 'block';
                         lastResult = ""; resultCount = 0;
+
                         Quagga.init({
                             inputStream : {
                                 name : "Live", type : "LiveStream", target: document.querySelector('#interactive'),
@@ -257,6 +221,7 @@ else:
                                 resultCount++;
                                 if (resultCount >= 3) {
                                     barcodeDisplay.value = code;
+                                    sendToStreamlit(code); // 嗶一聲，條碼秒同步傳回
                                     Quagga.stop();
                                     cameraArea.style.display = 'none';
                                     closeBtn.style.display = 'none';
@@ -268,40 +233,75 @@ else:
                     closeBtn.addEventListener('click', () => {
                         Quagga.stop(); cameraArea.style.display = 'none'; closeBtn.style.display = 'none';
                     });
-
-                    // 💡 終極安全路由：透過瀏覽器合法導向，帶上參數，0% 報錯率
-                    function executeSave(type, quality, reason) {
-                        let barcode = barcodeDisplay.value.trim();
-                        let exp = htmlExp.value.trim();
-                        if(!barcode) { alert("❌ 請先刷取條碼或手動輸入！"); return; }
-                        if(type === "散出" && !exp) { alert("❌ 散出模式必須填寫有效期限！"); return; }
-                        
-                        let targetUrl = window.parent.location.origin + window.parent.location.pathname + 
-                                        "?save_barcode=" + encodeURIComponent(barcode) + 
-                                        "&ret_type=" + encodeURIComponent(type) + 
-                                        "&exp_date=" + encodeURIComponent(exp) + 
-                                        "&quality=" + encodeURIComponent(quality) + 
-                                        "&reason=" + encodeURIComponent(reason);
-                        window.parent.location.href = targetUrl;
-                    }
-
-                    btnBox.addEventListener('click', () => executeSave("箱出", "良品", ""));
-                    btnLoose.addEventListener('click', () => executeSave("散出", "良品", ""));
-                    btnDamage.addEventListener('click', () => executeSave("散出", "不良品", htmlReason.value));
                 </script>
                 """,
-                height=650 # 給予足夠高度容納完美的實務控制台
+                height=110,
+                key="stable_barcode_bridge" # 官方唯一合法安全密鑰
             )
+            
+            st.markdown("---")
+            
+            # ========================================================
+            # 📝 【第二步】：先刷完商品，才在下方自由設定型態
+            # ========================================================
+            st.markdown("### 📝 第二步：請設定該商品的退貨形態與資料")
+            
+            received_code = html_value if html_value else ""
+            
+            # 建立一個純 Python 的手動確認文字盒，秒秀出剛才刷到的值
+            final_barcode = st.text_input("確認本筆點收條碼", value=received_code, help="相機掃描後，條碼會自動出現在此處。亦可手動輸入修改。").strip()
+                
+            # 自由勾選箱出/散出
+            ret_type = st.radio("選擇退貨形態", ["箱出", "散出"], horizontal=True)
+            
+            # 💡 【核心邏輯重鑄】：箱出免選良不良好、免填效期、鎖定數量 1
+            if ret_type == "箱出":
+                qty = 1
+                exp_date = ""
+                quality = "良品"
+                reason = ""
+                st.caption("💡 箱出模式：數量固定為 1，免填效期，預設良品入庫。")
+            else:
+                # 💡 【散出模式】：裝回數量鍵、效期框、良不良好選擇，以及「純手打」異常原因
+                exp_date = st.text_input("輸入有效期限 (例: 202706)")
+                
+                # 💡 【數量鍵重裝歸位！】
+                qty = st.number_input("輸入數量", min_value=1, value=1, step=1)
+                
+                quality = st.radio("商品貨況", ["良品", "不良品"], horizontal=True)
+                reason = ""
+                if quality == "不良品":
+                    # 💡 【徹底拔除下拉選單！】改回純手動輸入，要打什麼原因自己決定
+                    reason = st.text_input("請手動輸入異常原因 (例: 外盒壓損、內容物漏液)")
 
             st.markdown("---")
-            if st.button("🚪 完成點收並離開本批次", use_container_width=True):
-                if st.session_state['current_batch_id']:
-                    conn = get_db_connection()
-                    conn.execute("UPDATE return_batches SET status = '已完成' WHERE batch_id = ?", (st.session_state['current_batch_id'],))
-                    conn.commit()
-                    conn.close()
-                st.session_state['current_channel'] = ""
-                st.rerun()
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("💾 儲存此筆並繼續下一筆", use_container_width=True, type="primary"):
+                    if not final_barcode: 
+                        st.error("❌ 儲存失敗！請先刷取條碼！")
+                    elif ret_type == "散出" and not exp_date: 
+                        st.error("❌ 散出模式必須填寫有效期限！")
+                    else:
+                        conn = get_db_connection()
+                        today_str = datetime.now().strftime("%Y%m%d")
+                        conn.execute("INSERT OR IGNORE INTO return_batches VALUES (?, ?, ?, '作業中')", (st.session_state['current_batch_id'], st.session_state['current_channel'], today_str))
+                        seq = conn.execute("SELECT COUNT(*) FROM return_items WHERE batch_id = ?", (st.session_state['current_batch_id'],)).fetchone()[0] + 1
+                        conn.execute('''INSERT INTO return_items (batch_id, item_seq, barcode, return_type, expiry_date, quantity, quality_status, damage_reason, operator)
+                                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''', (st.session_state['current_batch_id'], seq, final_barcode, ret_type, exp_date, qty, quality, reason, st.session_state['username']))
+                        conn.commit()
+                        conn.close()
+                        st.success(f"✅ 條碼【{final_barcode}】（第 {seq} 筆）已成功入庫！")
+                        st.rerun()
+            with col2:
+                if st.button("🚪 完成點收並離開", use_container_width=True):
+                    if st.session_state['current_batch_id']:
+                        conn = get_db_connection()
+                        conn.execute("UPDATE return_batches SET status = '已完成' WHERE batch_id = ?", (st.session_state['current_batch_id'],))
+                        conn.commit()
+                        conn.close()
+                    st.session_state['current_channel'] = ""
+                    st.rerun()
 
     # --- 歷史紀錄分頁 ---
     with tabs[1]:
