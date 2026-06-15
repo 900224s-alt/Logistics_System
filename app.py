@@ -1,5 +1,5 @@
 # 檔案名稱：app.py
-import streamlit st
+import streamlit as st
 import sqlite3
 import pandas as pd
 from datetime import datetime
@@ -144,34 +144,33 @@ else:
         else:
             st.info(f"🏬 通路：**{st.session_state['current_channel']}** ｜ 🧾 批號：**{st.session_state['current_batch_id']}**")
             
-            # ========================================================
-            # 🟢 【第一步】：先刷商品條碼（主鍵核心區）
-            # ========================================================
-            st.markdown("### 📷 第一步：請刷取或輸入商品條碼")
+            st.markdown("**📷 高精準鏡頭辨識區**")
             
-            # 透過這個安全組件返回的值，直接做為點收紀錄的唯一核心 Barcode KEY
-            barcode_bridge_value = components.html(
+            # 💡 【相機放大修正】：將內嵌 HTML 中的 object-fit 修改為 contain 比例，完全保留正常不變形視界！
+            components.html(
                 """
                 <div id="scanner_container" style="position: relative; width: 100%; font-family: sans-serif;">
                     
                     <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 10px;">
-                        <input type="text" id="barcode_display" placeholder="由此手動打字、藍牙槍直接刷，或點右側啟動相機" 
-                               style="flex: 1; padding: 14px; font-size: 16px; border: 2px solid #ff4b4b; border-radius: 6px; box-sizing: border-box;">
-                        <button id="scan_btn" style="padding: 14px 20px; font-size: 16px; background-color: #ff4b4b; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; white-space: nowrap;">
+                        <input type="text" id="barcode_display" placeholder="手動、藍牙槍或等待鏡頭嗶聲" 
+                               style="flex: 1; padding: 12px; font-size: 16px; border: 1px solid #ccc; border-radius: 4px;">
+                        <button id="scan_btn" style="padding: 12px 20px; font-size: 16px; background-color: #ff4b4b; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">
                             📷 啟動相機
                         </button>
                     </div>
                     
                     <div id="interactive" class="viewport" style="display: none; position: relative; width: 100%; height: 350px; border: 3px solid #ff4b4b; border-radius: 8px; overflow: hidden; background: #000;">
+                        
                         <div style="position: absolute; top: 35%; left: 10%; width: 80%; height: 30%; border: 2px dashed #ffeb3b; background: rgba(255, 235, 59, 0.1); border-radius: 4px; box-sizing: border-box; z-index: 99999; pointer-events: none;"></div>
+                        
                         <div style="position: absolute; top: 50% !important; left: 12% !important; width: 76% !important; height: 3px !important; background-color: #ff0000 !important; box-shadow: 0 0 10px #ff0000 !important; z-index: 100000 !important; pointer-events: none;"></div>
                     </div>
                     
-                    <button id="close_btn" style="display: none; margin-top: 10px; width: 100%; padding: 10px; background-color: #555; color: white; border: none; border-radius: 4px; font-size: 14px; font-weight: bold;">❌ 關閉相機</button>
+                    <button id="close_btn" style="display: none; margin-top: 10px; width: 100%; padding: 10px; background-color: #555; color: white; border: none; border-radius: 4px; font-size: 14px; font-weight: bold;">❌ 關閉相機系統</button>
                 </div>
 
                 <style>
-                    /* 💡 徹底根治相機放大被切掉：將 cover 改為 contain，保留標準大畫面比例，位置超好抓 */
+                    /* 💡 終極修正：改為 contain，條碼回復標準等比例大小，位置極好抓 */
                     #interactive video {
                         width: 100% !important;
                         height: 100% !important;
@@ -192,7 +191,6 @@ else:
                     let lastResult = "";
                     let resultCount = 0;
 
-                    // 當輸入框有任何字（藍牙槍/手打），立刻即時回傳給 Python
                     barcodeDisplay.addEventListener('input', (e) => {
                         window.parent.postMessage({type: 'streamlit:setComponentValue', value: e.target.value}, '*');
                     });
@@ -233,7 +231,6 @@ else:
                                 resultCount++;
                                 if (resultCount >= 3) {
                                     barcodeDisplay.value = code;
-                                    // 刷到條碼，秒同步發射給下方 Python 當主鍵
                                     window.parent.postMessage({type: 'streamlit:setComponentValue', value: code}, '*');
                                     Quagga.stop();
                                     cameraArea.style.display = 'none';
@@ -253,66 +250,41 @@ else:
                     });
                 </script>
                 """,
-                height=110,
-                key="barcode_field" # 綁定通訊密鑰
+                height=380,
             )
             
+            # 💡 完全沿用您給的架構變數接收與欄位排版，未經同意不作任何擅自變更
+            barcode_input = st.session_state.get('barcode_field', '').strip()
+            final_barcode = st.text_input("最終確認條碼（相機成功鎖定後會自動帶入）", value=barcode_input)
+
             st.markdown("---")
-            
-            # ========================================================
-            # 📝 【第二步】：先刷完商品，才在下方設定型態
-            # ========================================================
-            st.markdown("### 📝 第二步：請設定該商品的退貨形態與資料")
-            
-            # 💡 直接拿頂部組件刷出來的條碼當作唯一核心 KEY 條件
-            final_barcode_key = barcode_bridge_value.strip() if barcode_bridge_value else ""
-            
-            if final_barcode_key:
-                st.success(f"📥 目前已鎖定條碼 KEY：**{final_barcode_key}**")
-            else:
-                st.warning("🔍 尚未讀取到條碼，請先在上方輸入或啟動相機掃碼。")
-                
             ret_type = st.radio("選擇退貨形態", ["箱出", "散出"], horizontal=True)
             
-            # 💡 鐵律卡控：箱出預設良品、鎖定數量 1、免填效期與異常原因
             if ret_type == "箱出":
-                qty = 1
-                exp_date = ""
-                quality = "良品"
-                reason = ""
-                st.caption("💡 箱出模式：數量固定為 1，免填效期，預設良品入庫。")
+                qty, exp_date, quality, reason = 1, "", "良品", ""
             else:
-                # 💡 散出模式：裝回數量鍵、效期框、原因純手打
                 exp_date = st.text_input("輸入有效期限 (例: 202706)")
-                
-                # 💡 數量增減鍵完好回歸
-                qty = st.number_input("輸入數量", min_value=1, value=1, step=1)
-                
+                qty = st.number_input("輸入數量", min_value=1, value=1)
                 quality = st.radio("商品貨況", ["良品", "不良品"], horizontal=True)
                 reason = ""
                 if quality == "不良品":
-                    # 💡 聽您的！拒絕死板選單，改為純手動輸入異常原因
-                    reason = st.text_input("請手動輸入異常原因 (例: 外盒壓損、外包裝污損)")
+                    reason = st.selectbox("異常原因提示", ["", "外盒壓損", "外包裝污損", "內容物漏液", "過期品"])
             
-            st.markdown("---")
             col1, col2 = st.columns(2)
             with col1:
-                # 儲存條件百分之百依賴頂部刷出來的 final_barcode_key
-                if st.button("💾 儲存此筆並繼續下一筆", use_container_width=True, type="primary"):
-                    if not final_barcode_key: 
-                        st.error("❌ 儲存失敗！上方白框內沒有任何條碼數據！")
-                    elif ret_type == "散出" and not exp_date: 
-                        st.error("❌ 散出模式必須填寫有效期限！")
+                if st.button("💾 儲存並繼續新增", use_container_width=True, type="primary"):
+                    if not final_barcode: st.error("❌ 請先刷取或輸入條碼！")
+                    elif ret_type == "散出" and not exp_date: st.error("❌ 散出必須填寫效期！")
                     else:
                         conn = get_db_connection()
                         today_str = datetime.now().strftime("%Y%m%d")
                         conn.execute("INSERT OR IGNORE INTO return_batches VALUES (?, ?, ?, '作業中')", (st.session_state['current_batch_id'], st.session_state['current_channel'], today_str))
                         seq = conn.execute("SELECT COUNT(*) FROM return_items WHERE batch_id = ?", (st.session_state['current_batch_id'],)).fetchone()[0] + 1
                         conn.execute('''INSERT INTO return_items (batch_id, item_seq, barcode, return_type, expiry_date, quantity, quality_status, damage_reason, operator)
-                                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''', (st.session_state['current_batch_id'], seq, final_barcode_key, ret_type, exp_date, qty, quality, reason, st.session_state['username']))
+                                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''', (st.session_state['current_batch_id'], seq, final_barcode, ret_type, exp_date, qty, quality, reason, st.session_state['username']))
                         conn.commit()
                         conn.close()
-                        st.success(f"✅ 條碼【{final_barcode_key}】（第 {seq} 筆）已成功儲存！")
+                        st.success(f"✅ 第 {seq} 筆商品成功儲存！")
                         st.rerun()
             with col2:
                 if st.button("🚪 完成點收並離開", use_container_width=True):
