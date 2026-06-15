@@ -16,36 +16,9 @@ ORIGINAL_ADMIN = "余宸緯"
 def init_db_if_not_exists():
     conn = sqlite3.connect('return_system.db')
     cursor = conn.cursor()
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS users (
-            username TEXT PRIMARY KEY,
-            password TEXT NOT NULL,
-            register_date TEXT,
-            role TEXT DEFAULT '一般用戶'
-        )
-    ''')
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS return_batches (
-            batch_id TEXT PRIMARY KEY,
-            channel_name TEXT,
-            create_date TEXT,
-            status TEXT DEFAULT '作業中'
-        )
-    ''')
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS return_items (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            batch_id TEXT,
-            item_seq INTEGER,
-            barcode TEXT,
-            return_type TEXT,
-            expiry_date TEXT,
-            quantity INTEGER,
-            quality_status TEXT,
-            damage_reason TEXT,
-            operator TEXT
-        )
-    ''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS users (username TEXT PRIMARY KEY, password TEXT NOT NULL, register_date TEXT, role TEXT DEFAULT '一般用戶')''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS return_batches (batch_id TEXT PRIMARY KEY, channel_name TEXT, create_date TEXT, status TEXT DEFAULT '作業中')''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS return_items (id INTEGER PRIMARY KEY AUTOINCREMENT, batch_id TEXT, item_seq INTEGER, barcode TEXT, return_type TEXT, expiry_date TEXT, quantity INTEGER, quality_status TEXT, damage_reason TEXT, operator TEXT)''')
     conn.commit()
     conn.close()
 
@@ -56,7 +29,7 @@ def get_db_connection():
     conn.row_factory = sqlite3.Row
     return conn
 
-# 💡 瓶頸1：新增 XLSX 匯出功能
+# 💡 匯出 XLSX 功能
 def to_excel(df):
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
@@ -69,7 +42,6 @@ if 'username' not in st.session_state: st.session_state['username'] = ""
 if 'is_admin' not in st.session_state: st.session_state['is_admin'] = False
 if 'current_channel' not in st.session_state: st.session_state['current_channel'] = ""
 if 'current_batch_id' not in st.session_state: st.session_state['current_batch_id'] = ""
-if 'current_env' not in st.session_state: st.session_state['current_env'] = "正式環境"
 
 st.title("📦 物流退貨點收系統")
 
@@ -96,7 +68,6 @@ if not st.session_state['logged_in']:
                     st.rerun()
                 else: st.error("❌ 姓名或密碼錯誤。")
             else: st.warning("⚠️ 請輸入姓名與密碼。")
-
     with tab2:
         st.subheader("新人員註冊")
         reg_name = st.text_input("請輸入你的中文真實姓名", key="reg_name").strip()
@@ -106,8 +77,7 @@ if not st.session_state['logged_in']:
                 conn = get_db_connection()
                 try:
                     initial_role = "管理者" if reg_name == ORIGINAL_ADMIN else "一般用戶"
-                    conn.execute('INSERT INTO users (username, password, register_date, role) VALUES (?, ?, ?, ?)', 
-                                 (reg_name, reg_pwd, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), initial_role))
+                    conn.execute('INSERT INTO users (username, password, register_date, role) VALUES (?, ?, ?, ?)', (reg_name, reg_pwd, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), initial_role))
                     conn.commit()
                     st.success(f"👍 【{reg_name}】註冊成功！請切換到[帳號登入]。")
                 except sqlite3.IntegrityError: st.error("❌ 這個姓名已被註冊。")
@@ -124,23 +94,18 @@ else:
         st.session_state['logged_in'] = False; st.rerun()
 
     tabs_list = ["📦 退貨點收作業", "🔍 歷史紀錄與修改申請"]
-    if st.session_state['is_admin']: 
-        tabs_list.extend(["🔔 主管修改批核", "👥 員工權限與離職維護"])
-        
+    if st.session_state['is_admin']: tabs_list.extend(["🔔 主管修改批核", "👥 員工權限與離職維護"])
     tabs = st.tabs(tabs_list)
     
-    # --- 分頁一：退貨點收作業 ---
+    # --- 分頁一 ---
     with tabs[0]:
         if st.session_state['current_channel'] == "":
             st.subheader("🚀 請設定本次作業環境與通路")
-            if st.session_state['is_admin']: env_choice = st.radio("⚙️ 作業環境", ["正式環境", "測試環境"], horizontal=True)
-            else: env_choice = "正式環境"
+            env_choice = st.radio("⚙️ 作業環境", ["正式環境", "測試環境"], horizontal=True) if st.session_state['is_admin'] else "正式環境"
             selected_chan = st.selectbox("🏬 選擇退貨通路", ["請選擇...", "MOMO", "寶雅", "康是美", "屈臣氏"])
-            
             if st.button("鎖定並開始作業", use_container_width=True):
                 if selected_chan != "請選擇...":
                     st.session_state['current_channel'] = selected_chan
-                    st.session_state['current_env'] = env_choice
                     today_str = datetime.now().strftime("%Y%m%d")
                     prefix = "TEST" if env_choice == "測試環境" else "Back"
                     conn = get_db_connection()
@@ -150,44 +115,8 @@ else:
                     st.rerun()
         else:
             st.info(f"🏬 通路：**{st.session_state['current_channel']}** ｜ 🧾 批號：**{st.session_state['current_batch_id']}**")
-            
-            st.markdown("**📷 高精準鏡頭辨識區**")
-            
-            components.html(
-                """
-                <div id="scanner_container" style="position: relative; width: 100%; font-family: sans-serif;">
-                    <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 10px;">
-                        <input type="text" id="barcode_display" placeholder="手動、藍牙槍或等待鏡頭嗶聲" 
-                               style="flex: 1; padding: 12px; font-size: 16px; border: 1px solid #ccc; border-radius: 4px;">
-                        <button id="scan_btn" style="padding: 12px 20px; font-size: 16px; background-color: #ff4b4b; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">
-                            📷 啟動相機
-                        </button>
-                    </div>
-                    <div id="interactive" class="viewport" style="display: none; position: relative; width: 100%; height: 300px; border: 3px solid #ff4b4b; border-radius: 8px; overflow: hidden; background: #000;">
-                        <div style="position: absolute; top: 35%; left: 10%; width: 80%; height: 30%; border: 2px dashed #ffeb3b; background: rgba(255, 235, 59, 0.1); border-radius: 4px; box-sizing: border-box; z-index: 99999; pointer-events: none;"></div>
-                        <div style="position: absolute; top: 50% !important; left: 12% !important; width: 76% !important; height: 3px !important; background-color: #ff0000 !important; box-shadow: 0 0 10px #ff0000 !important; z-index: 100000 !important; pointer-events: none;"></div>
-                    </div>
-                    <button id="close_btn" style="display: none; margin-top: 10px; width: 100%; padding: 10px; background-color: #555; color: white; border: none; border-radius: 4px; font-size: 14px; font-weight: bold;">❌ 關閉相機系統</button>
-                </div>
-                <style>#interactive video {width: 100% !important; height: 100% !important; object-fit: cover !important;} #interactive canvas {display: none !important;}</style>
-                <script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script>
-                <script>
-                    const barcodeDisplay = document.getElementById('barcode_display');
-                    const scanBtn = document.getElementById('scan_btn');
-                    const cameraArea = document.getElementById('interactive');
-                    const closeBtn = document.getElementById('close_btn');
-                    let lastResult = ""; let resultCount = 0;
-                    barcodeDisplay.addEventListener('input', (e) => { window.parent.postMessage({type: 'streamlit:setComponentValue', value: e.target.value}, '*'); });
-                    scanBtn.addEventListener('click', () => { cameraArea.style.display = 'block'; closeBtn.style.display = 'block'; lastResult = ""; resultCount = 0; Quagga.init({ inputStream : { name : "Live", type : "LiveStream", target: document.querySelector('#interactive'), constraints: { width: { min: 640, ideal: 1280 }, height: { min: 480, ideal: 960 }, facingMode: "environment" } }, locate: true, patchSize: "medium", halfSample: true, frequency: 4, decoder : { readers : ["code_128_reader", "ean_reader", "ean_8_reader", "code_39_reader"] } }, function(err) { if (err) { alert("鏡頭開門失敗！"); return; } Quagga.start(); }); });
-                    Quagga.onDetected(function(data) { if(data.codeResult && data.codeResult.code) { let code = data.codeResult.code; if (code === lastResult) { resultCount++; if (resultCount >= 3) { barcodeDisplay.value = code; window.parent.postMessage({type: 'streamlit:setComponentValue', value: code}, '*'); Quagga.stop(); cameraArea.style.display = 'none'; closeBtn.style.display = 'none'; } } else { lastResult = code; resultCount = 1; } } });
-                    closeBtn.addEventListener('click', () => { Quagga.stop(); cameraArea.style.display = 'none'; closeBtn.style.display = 'none'; });
-                </script>
-                """,
-                height=380,
-            )
-            
+            components.html("""<div id="scanner_container" style="position: relative; width: 100%; font-family: sans-serif;"><div style="display: flex; gap: 8px; align-items: center; margin-bottom: 10px;"><input type="text" id="barcode_display" placeholder="手動、藍牙槍或等待鏡頭嗶聲" style="flex: 1; padding: 12px; font-size: 16px; border: 1px solid #ccc; border-radius: 4px;"><button id="scan_btn" style="padding: 12px 20px; font-size: 16px; background-color: #ff4b4b; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">📷 啟動相機</button></div><div id="interactive" class="viewport" style="display: none; position: relative; width: 100%; height: 300px; border: 3px solid #ff4b4b; border-radius: 8px; overflow: hidden; background: #000;"><div style="position: absolute; top: 35%; left: 10%; width: 80%; height: 30%; border: 2px dashed #ffeb3b; background: rgba(255, 235, 59, 0.1); border-radius: 4px; box-sizing: border-box; z-index: 99999; pointer-events: none;"></div><div style="position: absolute; top: 50% !important; left: 12% !important; width: 76% !important; height: 3px !important; background-color: #ff0000 !important; box-shadow: 0 0 10px #ff0000 !important; z-index: 100000 !important; pointer-events: none;"></div></div><button id="close_btn" style="display: none; margin-top: 10px; width: 100%; padding: 10px; background-color: #555; color: white; border: none; border-radius: 4px; font-size: 14px; font-weight: bold;">❌ 關閉相機系統</button></div><style>#interactive video {width: 100% !important; height: 100% !important; object-fit: cover !important;} #interactive canvas {display: none !important;}</style><script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script><script>const barcodeDisplay = document.getElementById('barcode_display'); const scanBtn = document.getElementById('scan_btn'); const cameraArea = document.getElementById('interactive'); const closeBtn = document.getElementById('close_btn'); let lastResult = ""; let resultCount = 0; barcodeDisplay.addEventListener('input', (e) => { window.parent.postMessage({type: 'streamlit:setComponentValue', value: e.target.value}, '*'); }); scanBtn.addEventListener('click', () => { cameraArea.style.display = 'block'; closeBtn.style.display = 'block'; lastResult = ""; resultCount = 0; Quagga.init({ inputStream : { name : "Live", type : "LiveStream", target: document.querySelector('#interactive'), constraints: { width: { min: 640, ideal: 1280 }, height: { min: 480, ideal: 960 }, facingMode: "environment" } }, locate: true, patchSize: "medium", halfSample: true, frequency: 4, decoder : { readers : ["code_128_reader", "ean_reader", "ean_8_reader", "code_39_reader"] } }, function(err) { if (err) { alert("鏡頭開門失敗！"); return; } Quagga.start(); }); }); Quagga.onDetected(function(data) { if(data.codeResult && data.codeResult.code) { let code = data.codeResult.code; if (code === lastResult) { resultCount++; if (resultCount >= 3) { barcodeDisplay.value = code; window.parent.postMessage({type: 'streamlit:setComponentValue', value: code}, '*'); Quagga.stop(); cameraArea.style.display = 'none'; closeBtn.style.display = 'none'; } } else { lastResult = code; resultCount = 1; } } }); closeBtn.addEventListener('click', () => { Quagga.stop(); cameraArea.style.display = 'none'; closeBtn.style.display = 'none'; });</script>""", height=380)
             final_barcode = st.text_input("最終確認條碼", value=st.session_state.get('barcode_field', ''))
-
             st.markdown("---")
             ret_type = st.radio("選擇退貨形態", ["箱出", "散出"], horizontal=True)
             if ret_type == "箱出": qty, exp_date, quality, reason = 1, "", "良品", ""
@@ -195,9 +124,7 @@ else:
                 exp_date = st.text_input("輸入有效期限 (例: 202706)")
                 qty = st.number_input("輸入數量", min_value=1, value=1)
                 quality = st.radio("商品貨況", ["良品", "不良品"], horizontal=True)
-                reason = ""
-                if quality == "不良品": reason = st.selectbox("異常原因提示", ["", "外盒壓損", "外包裝污損", "內容物漏液", "過期品"])
-            
+                reason = st.selectbox("異常原因提示", ["", "外盒壓損", "外包裝污損", "內容物漏液", "過期品"]) if quality == "不良品" else ""
             col1, col2 = st.columns(2)
             with col1:
                 if st.button("💾 儲存並繼續新增", use_container_width=True, type="primary"):
@@ -216,11 +143,9 @@ else:
                         conn = get_db_connection(); conn.execute("UPDATE return_batches SET status = '已完成' WHERE batch_id = ?", (st.session_state['current_batch_id'],)); conn.commit(); conn.close()
                     st.session_state['current_channel'] = ""; st.rerun()
 
-   # --- 歷史紀錄分頁 (修正版) ---
+    # --- 分頁二：歷史紀錄 (修正版) ---
     with tabs[1]:
         st.header("🔍 歷史紀錄與篩選")
-        
-        # 篩選區域
         with st.expander("📊 篩選查詢條件", expanded=True):
             col_f1, col_f2, col_f3 = st.columns(3)
             with col_f1: start_date = st.date_input("起始日期", value=None)
@@ -228,46 +153,25 @@ else:
             with col_f3: filter_op = st.text_input("篩選作業員")
 
         conn = get_db_connection()
-        # 聯集查詢資料
-        df = pd.read_sql_query("""
-            SELECT b.create_date, i.* FROM return_items i 
-            LEFT JOIN return_batches b ON i.batch_id = b.batch_id
-        """, conn)
+        df = pd.read_sql_query("SELECT b.create_date, i.* FROM return_items i LEFT JOIN return_batches b ON i.batch_id = b.batch_id", conn)
         conn.close()
 
         if not df.empty:
-            # 1. 處理日期與欄位順序
             df['建檔日期'] = pd.to_datetime(df['create_date']).dt.strftime('%Y/%m/%d')
-            # 調整欄位順序：將建檔日期放到最前面
-            cols = ['建檔日期'] + [c for c in df.columns if c not in ['建檔日期', 'create_date']]
-            df = df[cols]
-            
-            # 2. 處理條碼格式 (避免科學記號)
             df['barcode'] = df['barcode'].astype(str).apply(lambda x: f"'{x}")
             
-            # 3. 執行篩選邏輯 (即時自動更新)
-            if start_date:
-                df = df[df['建檔日期'] >= start_date.strftime('%Y/%m/%d')]
-            if filter_barcode:
-                df = df[df['barcode'].str.contains(filter_barcode)]
-            if filter_op:
-                df = df[df['operator'].str.contains(filter_op)]
+            if start_date: df = df[df['建檔日期'] >= start_date.strftime('%Y/%m/%d')]
+            if filter_barcode: df = df[df['barcode'].str.contains(filter_barcode)]
+            if filter_op: df = df[df['operator'].str.contains(filter_op)]
             
-            # 4. 顯示表格 (use_container_width=True 同時隱藏預設的索引欄)
-            st.dataframe(
-                df.drop(columns=['create_date']), # 隱藏原始 create_date
-                use_container_width=True, 
-                hide_index=True # 關鍵參數：隱藏您紅框圈起來的那一欄索引
-            )
+            # 顯示表格並移除索引與 create_date
+            st.dataframe(df.drop(columns=['create_date']), use_container_width=True, hide_index=True)
             
-            # 5. 下載報表
+            # 下載報表
             st.download_button(
                 label="📥 下載 XLSX 報表",
                 data=to_excel(df.drop(columns=['create_date'])),
                 file_name=f"退貨紀錄_{datetime.now().strftime('%Y%m%d')}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
-        else:
-            st.info("尚無歷史單據。")
             )
         else: st.info("尚無歷史單據。")
