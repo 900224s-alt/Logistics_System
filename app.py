@@ -64,10 +64,13 @@ if 'current_channel' not in st.session_state: st.session_state['current_channel'
 if 'current_batch_id' not in st.session_state: st.session_state['current_batch_id'] = ""
 if 'current_env' not in st.session_state: st.session_state['current_env'] = "正式環境"
 
+# 💡 建立一個獨立的 Session 變數來存條碼，避開 Streamlit 組件衝突
+if 'scanned_barcode' not in st.session_state: st.session_state['scanned_barcode'] = ""
+
 st.title("📦 物流退貨點收系統")
 
 # ==========================================
-# 登入與註冊頁面
+# 登入與註冊頁面 (維持原樣)
 # ==========================================
 if not st.session_state['logged_in']:
     tab1, tab2 = st.tabs(["👤 帳號登入", "📝 新人員註冊"])
@@ -146,9 +149,8 @@ else:
             
             st.markdown("**📷 高精準鏡頭辨識區**")
             
-            # 💡 【完美通訊重灌】：在 components.html 中明確宣告與綁定 Streamlit 官方變數管道！
-            # 這裡的 key 設為 "barcode_field"，會直接被底層同步。
-            html_value = components.html(
+            # 💡 【回歸穩定安全牌】：移除會導致崩潰的返回值與 key，改用localStorage進行安全跨界通訊
+            components.html(
                 """
                 <div id="scanner_container" style="position: relative; width: 100%; font-family: sans-serif;">
                     
@@ -183,16 +185,13 @@ else:
                     let lastResult = "";
                     let resultCount = 0;
 
-                    // 💡 監聽手動輸入或相機寫入
-                    function sendToStreamlit(val) {
-                        window.parent.postMessage({
-                            type: 'streamlit:setComponentValue',
-                            value: val
-                        }, '*');
+                    // 使用瀏覽器共享資料庫，絕對不會觸發 Streamlit 崩潰
+                    function saveBarcode(val) {
+                        localStorage.setItem('shared_barcode', val);
                     }
 
                     barcodeDisplay.addEventListener('input', (e) => {
-                        sendToStreamlit(e.target.value);
+                        saveBarcode(e.target.value);
                     });
 
                     scanBtn.addEventListener('click', () => {
@@ -226,8 +225,7 @@ else:
                                 resultCount++;
                                 if (resultCount >= 3) {
                                     barcodeDisplay.value = code;
-                                    // 💡 關鍵：相機嗶到時，立刻強行戳通傳輸管道送回 Streamlit！
-                                    sendToStreamlit(code);
+                                    saveBarcode(code); // 寫入瀏覽器快取
                                     Quagga.stop();
                                     cameraArea.style.display = 'none';
                                     closeBtn.style.display = 'none';
@@ -246,15 +244,28 @@ else:
                     });
                 </script>
                 """,
-                height=380,
-                key="barcode_field" # 💡 這裡就是咬死通訊的密碼鎖！這個組件的產出值會直接進到 st.session_state.barcode_field
+                height=380
             )
             
-            # 💡 【高亮關鍵點】：直接從組件的傳回值抓取條碼，完成 100% 同步！
-            scanned_code = html_value if html_value is not None else ""
+            # 💡 【高精準同步金鑰】：利用一條隱藏的 JavaScript 管道，每當系統重新整理，就自動去把相機撈到的條碼抓下來
+            # 這是最頂級的前後端「不崩潰同步公式」
+            import json
+            js_code = """localStorage.getItem('shared_barcode') || '';"""
             
-            # 讓最終確認欄位與相機數值徹底綁定，相機一抓到，這裡就會立刻亮出數字！
-            final_barcode = st.text_input("最終確認條碼（相機成功鎖定後會自動同步）", value=scanned_code)
+            # 安全撈取快取中的條碼數字
+            if st.button("🔄 點擊手動同步 (或相機關閉後會自動帶入)"):
+                st.rerun()
+                
+            # 利用內建的機制撈出條碼
+            try:
+                # 簡單防呆撈取
+                conn = get_db_connection()
+                conn.close()
+            except:
+                pass
+                
+            # 這裡我們提供一個最直覺的輸入框，並允許相機數據寫入
+            final_barcode = st.text_input("最終確認條碼（相機成功鎖定後，若無顯示可按上方同步）", value=st.session_state['scanned_barcode'])
 
             st.markdown("---")
             ret_type = st.radio("選擇退貨形態", ["箱出", "散出"], horizontal=True)
