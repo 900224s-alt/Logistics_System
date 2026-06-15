@@ -5,7 +5,7 @@ from datetime import datetime
 
 st.set_page_config(page_title="物流退貨點收系統", layout="wide")
 
-# 💡 初始化資料庫
+# 初始化資料庫
 def init_db():
     conn = sqlite3.connect('return_system.db')
     cursor = conn.cursor()
@@ -28,7 +28,6 @@ if 'logged_in' not in st.session_state:
 st.title("📦 物流退貨點收系統")
 
 if not st.session_state['logged_in']:
-    # [登入註冊區維持原樣]
     name = st.text_input("姓名")
     pwd = st.text_input("密碼", type="password")
     if st.button("登入"):
@@ -39,33 +38,41 @@ if not st.session_state['logged_in']:
             conn.close(); st.rerun()
         conn.close()
 else:
-    st.sidebar.write(f"👤 {st.session_state['username']}")
-    if st.sidebar.button("登出"): st.session_state.update({'logged_in': False}); st.rerun()
+    st.sidebar.write(f"👤 {st.session_state['username']} {'(👑 管理者)' if st.session_state['is_admin'] else ''}")
+    if st.sidebar.button("登出"): st.session_state.update({'logged_in': False, 'current_channel': ""}); st.rerun()
     
     tabs = st.tabs(["📦 作業與點收", "🔍 歷史紀錄"])
     
     with tabs[0]:
-        env = st.radio("環境", ["正式環境", "測試環境"], horizontal=True)
+        # --- 權限控制區：只有管理者看得到環境切換 ---
+        if st.session_state['is_admin']:
+            env = st.radio("環境選擇 (僅管理者可見)", ["正式環境", "測試環境"], horizontal=True)
+        else:
+            env = "正式環境" # 一般用戶強制預設為正式環境
+        
         chan = st.selectbox("通路", ["請選擇...", "MOMO", "寶雅", "康是美", "屈臣氏"])
-        if st.button("鎖定"):
-            st.session_state['current_channel'] = chan
-            today = datetime.now().strftime("%Y%m%d")
-            prefix = "TEST" if env == "測試環境" else "Back"
-            conn = get_conn()
-            cnt = conn.execute(f"SELECT COUNT(*) FROM return_batches WHERE batch_id LIKE '{prefix}{today}%'").fetchone()[0]
-            st.session_state['current_batch_id'] = f"{prefix}{today}{cnt+1:03d}"
-            conn.execute("INSERT INTO return_batches VALUES (?, ?, ?, '作業中')", (st.session_state['current_batch_id'], chan, today))
-            conn.commit(); conn.close(); st.rerun()
+        
+        if st.button("鎖定環境並開始"):
+            if chan != "請選擇...":
+                st.session_state['current_channel'] = chan
+                today = datetime.now().strftime("%Y%m%d")
+                prefix = "TEST" if env == "測試環境" else "Back"
+                conn = get_conn()
+                cnt = conn.execute(f"SELECT COUNT(*) FROM return_batches WHERE batch_id LIKE '{prefix}{today}%'").fetchone()[0]
+                st.session_state['current_batch_id'] = f"{prefix}{today}{cnt+1:03d}"
+                conn.execute("INSERT INTO return_batches VALUES (?, ?, ?, '作業中')", (st.session_state['current_batch_id'], chan, today))
+                conn.commit(); conn.close(); st.rerun()
         
         if st.session_state['current_channel']:
-            st.write(f"批號：{st.session_state['current_batch_id']}")
+            st.write(f"當前批號：{st.session_state['current_batch_id']}")
             bc = st.text_input("條碼")
             r_type = st.radio("箱/散出", ["箱出", "散出"], horizontal=True)
             exp = st.text_input("效期")
             qty = st.number_input("數量", value=1)
             qual = st.radio("貨況", ["良品", "不良品"], horizontal=True)
             reason = st.text_input("異常原因")
-            if st.button("儲存"):
+            
+            if st.button("儲存資料"):
                 conn = get_conn()
                 seq = conn.execute("SELECT COUNT(*) FROM return_items WHERE batch_id = ?", (st.session_state['current_batch_id'],)).fetchone()[0] + 1
                 conn.execute('INSERT INTO return_items (batch_id, item_seq, barcode, return_type, expiry_date, quantity, quality_status, damage_reason, operator) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', 
@@ -79,28 +86,20 @@ else:
         filter_o = c3.text_input("作業員搜尋")
         
         conn = get_conn()
-        # 💡 關鍵修復：這裡撈取了所有欄位，保證資料完整性
-        query = """SELECT b.create_date, i.batch_id, i.item_seq, i.barcode, i.return_type, i.expiry_date, i.quantity, i.quality_status, i.damage_reason, i.operator 
-                   FROM return_items i LEFT JOIN return_batches b ON i.batch_id = b.batch_id"""
+        # 撈取所有欄位確保表格完整
+        query = """SELECT b.create_date, i.* FROM return_items i LEFT JOIN return_batches b ON i.batch_id = b.batch_id"""
         df = pd.read_sql_query(query, conn)
         conn.close()
         
         if not df.empty:
             df.rename(columns={'create_date': '建檔日期'}, inplace=True)
-            # 確保日期欄位處理正確
             df['日期對比'] = pd.to_datetime(df['建檔日期'], errors='coerce').dt.date
             df = df[df['日期對比'] == start_d]
             
             if filter_b: df = df[df['barcode'].astype(str).str.contains(filter_b)]
             if filter_o: df = df[df['operator'].astype(str).str.contains(filter_o)]
             
-            # 整理欄位顯示順序
-            df = df.drop(columns=['日期對比'])
-            cols = ['建檔日期'] + [c for c in df.columns if c != '建檔日期']
-            df = df[cols]
-            
+            df = df.drop(columns=['日期對比', 'id'], errors='ignore')
             st.dataframe(df, use_container_width=True, hide_index=True)
             csv = df.to_csv(index=False).encode('utf-8-sig')
-            st.download_button("📥 下載 CSV 報表", data=csv, file_name="report.csv", mime="text/csv")
-        else:
-            st.info("該日期無資料。")
+            st.download_button("📥 下載 CSV", data=csv, file_name="report.csv", mime="text/csv")
