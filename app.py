@@ -44,14 +44,13 @@ else:
     tabs = st.tabs(["📦 作業與點收", "🔍 歷史紀錄"])
     
     with tabs[0]:
-        # --- 權限控制區：只有管理者看得到環境切換 ---
+        # 管理者環境選擇
         if st.session_state['is_admin']:
-            env = st.radio("環境選擇 (僅管理者可見)", ["正式環境", "測試環境"], horizontal=True)
+            env = st.radio("環境選擇", ["正式環境", "測試環境"], horizontal=True)
         else:
-            env = "正式環境" # 一般用戶強制預設為正式環境
+            env = "正式環境"
         
         chan = st.selectbox("通路", ["請選擇...", "MOMO", "寶雅", "康是美", "屈臣氏"])
-        
         if st.button("鎖定環境並開始"):
             if chan != "請選擇...":
                 st.session_state['current_channel'] = chan
@@ -71,7 +70,6 @@ else:
             qty = st.number_input("數量", value=1)
             qual = st.radio("貨況", ["良品", "不良品"], horizontal=True)
             reason = st.text_input("異常原因")
-            
             if st.button("儲存資料"):
                 conn = get_conn()
                 seq = conn.execute("SELECT COUNT(*) FROM return_items WHERE batch_id = ?", (st.session_state['current_batch_id'],)).fetchone()[0] + 1
@@ -80,26 +78,29 @@ else:
                 conn.commit(); conn.close(); st.rerun()
 
     with tabs[1]:
+        st.header("🔍 歷史紀錄")
         c1, c2, c3 = st.columns(3)
         start_d = c1.date_input("查詢日期", value=datetime.now().date())
         filter_b = c2.text_input("條碼搜尋")
         filter_o = c3.text_input("作業員搜尋")
         
         conn = get_conn()
-        # 撈取所有欄位確保表格完整
-        query = """SELECT b.create_date, i.* FROM return_items i LEFT JOIN return_batches b ON i.batch_id = b.batch_id"""
+        # 💡 修復關鍵：直接明確列出每個欄位，絕不使用 i.* 或聯集衝突語法
+        query = """SELECT b.create_date AS 建檔日期, i.batch_id, i.item_seq, i.barcode, i.return_type, i.expiry_date, i.quantity, i.quality_status, i.damage_reason, i.operator 
+                   FROM return_items i 
+                   LEFT JOIN return_batches b ON i.batch_id = b.batch_id"""
         df = pd.read_sql_query(query, conn)
         conn.close()
         
         if not df.empty:
-            df.rename(columns={'create_date': '建檔日期'}, inplace=True)
             df['日期對比'] = pd.to_datetime(df['建檔日期'], errors='coerce').dt.date
             df = df[df['日期對比'] == start_d]
             
             if filter_b: df = df[df['barcode'].astype(str).str.contains(filter_b)]
             if filter_o: df = df[df['operator'].astype(str).str.contains(filter_o)]
             
-            df = df.drop(columns=['日期對比', 'id'], errors='ignore')
-            st.dataframe(df, use_container_width=True, hide_index=True)
+            st.dataframe(df.drop(columns=['日期對比']), use_container_width=True, hide_index=True)
             csv = df.to_csv(index=False).encode('utf-8-sig')
             st.download_button("📥 下載 CSV", data=csv, file_name="report.csv", mime="text/csv")
+        else:
+            st.info("該日期無資料，或請檢查搜尋條件。")
