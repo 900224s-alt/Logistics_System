@@ -5,9 +5,10 @@ from datetime import datetime
 
 st.set_page_config(page_title="物流退貨點收系統", layout="wide")
 
-# 核心設定
+# 💡 核心設定
 ORIGINAL_ADMIN = "余宸緯"
 
+# 初始化資料庫
 def init_db():
     conn = sqlite3.connect('return_system.db')
     cursor = conn.cursor()
@@ -23,7 +24,7 @@ def get_conn():
     conn.row_factory = sqlite3.Row
     return conn
 
-# Session 管理
+# 初始化 Session (補強權限與頻道判斷)
 if 'logged_in' not in st.session_state: 
     st.session_state.update({'logged_in': False, 'username': "", 'is_admin': False, 'current_channel': "", 'current_batch_id': ""})
 
@@ -55,50 +56,66 @@ if not st.session_state['logged_in']:
             conn.close()
 else:
     st.sidebar.write(f"👤 {st.session_state['username']} {'(👑 管理者)' if st.session_state['is_admin'] else ''}")
-    if st.sidebar.button("登出"): st.session_state.update({'logged_in': False}); st.rerun()
+    if st.sidebar.button("登出"): st.session_state.update({'logged_in': False, 'current_channel': "", 'current_batch_id': ""}); st.rerun()
     
     tabs_names = ["📦 退貨點收", "🔍 歷史紀錄"]
     if st.session_state['is_admin']: tabs_names.append("🔔 管理區")
     tabs = st.tabs(tabs_names)
     
+    # 點收作業區
+    with tabs[0]:
+        # 【強制顯示條件判斷】：確保無論如何只要登入就能操作點收
+        if st.session_state['current_channel'] == "":
+            chan = st.selectbox("選擇通路", ["請選擇...", "MOMO", "寶雅", "康是美", "屈臣氏"])
+            if st.button("鎖定並開始") and chan != "請選擇...":
+                st.session_state['current_channel'] = chan
+                today = datetime.now().strftime("%Y%m%d")
+                conn = get_conn()
+                cnt = conn.execute("SELECT COUNT(*) FROM return_batches WHERE batch_id LIKE ?", (f"Back{today}%",)).fetchone()[0]
+                st.session_state['current_batch_id'] = f"Back{today}{cnt+1:03d}"
+                conn.execute("INSERT INTO return_batches VALUES (?, ?, ?, '作業中')", (st.session_state['current_batch_id'], chan, today))
+                conn.commit(); conn.close(); st.rerun()
+        else:
+            st.write(f"🏬 目前通路：{st.session_state['current_channel']} ｜ 🧾 批號：{st.session_state['current_batch_id']}")
+            bc = st.text_input("輸入條碼")
+            if st.button("儲存"):
+                conn = get_conn()
+                seq = conn.execute("SELECT COUNT(*) FROM return_items WHERE batch_id = ?", (st.session_state['current_batch_id'],)).fetchone()[0] + 1
+                conn.execute('INSERT INTO return_items (batch_id, item_seq, barcode, operator) VALUES (?, ?, ?, ?)', (st.session_state['current_batch_id'], seq, bc, st.session_state['username']))
+                conn.commit(); conn.close(); st.rerun()
+            if st.button("結束作業"): st.session_state['current_channel'] = ""; st.rerun()
+
+    # 歷史紀錄區
     with tabs[1]:
         st.header("🔍 歷史紀錄")
         c1, c2, c3 = st.columns(3)
-        # 日期篩選器：預設選取當天
         start_d = c1.date_input("查詢日期", value=datetime.now().date())
         filter_b = c2.text_input("條碼搜尋")
         filter_o = c3.text_input("作業員搜尋")
         
         conn = get_conn()
-        query = """SELECT b.create_date, i.batch_id, i.item_seq, i.barcode, i.return_type, i.expiry_date, i.quantity, i.quality_status, i.damage_reason, i.operator 
-                   FROM return_items i LEFT JOIN return_batches b ON i.batch_id = b.batch_id"""
-        df = pd.read_sql_query(query, conn)
+        df = pd.read_sql_query("SELECT b.create_date, i.batch_id, i.item_seq, i.barcode, i.return_type, i.expiry_date, i.quantity, i.quality_status, i.damage_reason, i.operator FROM return_items i LEFT JOIN return_batches b ON i.batch_id = b.batch_id", conn)
         conn.close()
         
         if not df.empty:
             df.rename(columns={'create_date': '建檔日期'}, inplace=True)
-            # 確保日期格式一致，並執行篩選
             df['日期對比'] = pd.to_datetime(df['建檔日期'], errors='coerce').dt.date
-            
-            # 【關鍵修復】：將日期篩選邏輯寫入 DataFrame 過濾
             df = df[df['日期對比'] == start_d]
             
-            # 移除日期對比輔助欄位，並將 barcode 直接轉換為字串但移除前綴
-            df = df.drop(columns=['日期對比'])
-            df['建檔日期'] = pd.to_datetime(df['建檔日期'], errors='coerce').dt.strftime('%Y/%m/%d')
-            
             if filter_b: df = df[df['barcode'].astype(str).str.contains(filter_b)]
-            if filter_o: df = df[df['operator'].str.contains(filter_o)]
+            if filter_o: df = df[df['operator'].astype(str).str.contains(filter_o)]
             
+            df = df.drop(columns=['日期對比'])
             cols = ['建檔日期'] + [c for c in df.columns if c != '建檔日期']
             df = df[cols]
             
-            # 使用 st.dataframe 的 display 參數來避免科學記號，且不顯示索引
-            st.dataframe(df, use_container_width=True, hide_index=True, column_config={
-                "barcode": st.column_config.TextColumn("barcode")
-            })
-            
+            st.dataframe(df, use_container_width=True, hide_index=True, column_config={"barcode": st.column_config.TextColumn("barcode")})
             csv = df.to_csv(index=False).encode('utf-8-sig')
             st.download_button("📥 下載 CSV 報表", data=csv, file_name="report.csv", mime="text/csv")
         else:
-            st.info("該日期暫無紀錄。")
+            st.info("該日期無資料。")
+            
+    if st.session_state['is_admin']:
+        with tabs[2]:
+            st.header("🔔 管理區")
+            st.write("管理者權限驗證成功。")
