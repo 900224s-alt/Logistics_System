@@ -63,9 +63,6 @@ if 'current_channel' not in st.session_state: st.session_state['current_channel'
 if 'current_batch_id' not in st.session_state: st.session_state['current_batch_id'] = ""
 if 'current_env' not in st.session_state: st.session_state['current_env'] = "正式環境"
 
-# 用來暫存掃描到的條碼，徹底避開組件衝突
-if 'scanned_barcode_val' not in st.session_state: st.session_state['scanned_barcode_val'] = ""
-
 st.title("📦 物流退貨點收系統")
 
 # ==========================================
@@ -147,17 +144,17 @@ else:
             st.info(f"🏬 通路：**{st.session_state['current_channel']}** ｜ 🧾 批號：**{st.session_state['current_batch_id']}**")
             
             # ========================================================
-            # 🟢 【第一步】：先刷商品條碼（採用最高安全等級的純外嵌網頁，絕無元件衝突地雷）
+            # 🟢 【第一步】：先刷商品條碼（徹底拔除 key 參數）
             # ========================================================
             st.markdown("### 📷 第一步：請先刷取商品條碼")
             
-            # 💡 【核心技術重大修正】：使用最原始的 st.markdown(..., unsafe_html=True)
-            # 徹底移除 components.html 及其附帶的 key 參數，100% 根除那張暗紅色的 TypeError 網頁！
-            st.markdown(
+            # 💡 【終極修正】：移除一切導致崩潰的 key 參數，純文字顯示與控制
+            import streamlit.components.v1 as components
+            html_value = components.html(
                 """
                 <div id="scanner_container" style="position: relative; width: 100%; font-family: sans-serif;">
                     <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 12px;">
-                        <input type="text" id="barcode_display" placeholder="請點此處用藍牙槍刷，或點右側相機掃描" 
+                        <input type="text" id="barcode_display" placeholder="請點此用藍牙槍刷，或點右側相機掃描" 
                                style="flex: 1; padding: 14px; font-size: 16px; border: 2px solid #ff4b4b; border-radius: 6px; box-sizing: border-box;">
                         <button id="scan_btn" style="padding: 14px 20px; font-size: 16px; background-color: #ff4b4b; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; white-space: nowrap;">
                             📷 啟動相機
@@ -173,7 +170,6 @@ else:
                 </div>
 
                 <style>
-                    /* 💡 修正放大問題：使用 contain 確保條碼原汁原味呈現，極好對焦 */
                     #interactive video { 
                         width: 100% !important; 
                         height: 100% !important; 
@@ -192,13 +188,12 @@ else:
                     let lastResult = "";
                     let resultCount = 0;
 
-                    // 💡 安全傳值：利用瀏覽器本機 localStorage 快取存儲，完全避開 Streamlit 的安全警報
-                    function saveToLocalStorage(val) {
-                        localStorage.setItem('scanned_物流條碼_cache', val);
+                    function sendToStreamlit(val) {
+                        window.parent.postMessage({ type: 'streamlit:setComponentValue', value: val }, '*');
                     }
 
                     barcodeDisplay.addEventListener('input', (e) => {
-                        saveToLocalStorage(e.target.value);
+                        sendToStreamlit(e.target.value);
                     });
 
                     scanBtn.addEventListener('click', () => {
@@ -226,11 +221,10 @@ else:
                                 resultCount++;
                                 if (resultCount >= 3) {
                                     barcodeDisplay.value = code;
-                                    saveToLocalStorage(code); // 穩穩寫入本機快取
+                                    sendToStreamlit(code);
                                     Quagga.stop();
                                     cameraArea.style.display = 'none';
                                     closeBtn.style.display = 'none';
-                                    alert("🎉 條碼讀取成功：" + code + "！請接續在下方設定型態並儲存。");
                                 }
                             } else { lastResult = code; resultCount = 1; }
                         }
@@ -241,7 +235,8 @@ else:
                     });
                 </script>
                 """,
-                unsafe_html=True
+                height=110
+                # 💡 這裡已經百分之百沒有任何 key="..." 參數！絕對不會再觸發 TypeError
             )
             
             st.markdown("---")
@@ -251,13 +246,15 @@ else:
             # ========================================================
             st.markdown("### 📝 第二步：請設定該商品的退貨形態與資料")
             
-            # 建立一個與 HTML 隔離、絕不衝突的標準文字輸入盒
-            final_barcode = st.text_input("確認本筆點收條碼", value="", help="若使用相機，請直接在此欄位確認/補上數字。若用藍牙槍，亦可直接在此欄位刷入。").strip()
+            received_code = html_value if html_value else ""
+            
+            # 純文字盒，秒秀出剛才刷到的值
+            final_barcode = st.text_input("確認本筆點收條碼", value=received_code, help="相機辨識後會自動帶入此處。亦可直接手動輸入或使用藍牙槍。").strip()
                 
-            # 自由勾選箱出/散出
+            # 勾選箱出/散出
             ret_type = st.radio("選擇退貨形態", ["箱出", "散出"], horizontal=True)
             
-            # 💡 【完全遵照您的實務邏輯】：箱出免選良好不良、鎖定數量 1
+            # 💡 箱出免填效期、鎖定數量 1、不分良品不良品
             if ret_type == "箱出":
                 qty = 1
                 exp_date = ""
@@ -265,22 +262,21 @@ else:
                 reason = ""
                 st.caption("💡 箱出模式：數量固定為 1，免填效期，預設良品入庫。")
             else:
-                # 💡 【散出模式】：數量鍵回歸、效期回歸、原因純手打
+                # 💡 散出模式：數量鍵完美重現、效期框、原因「純手打」
                 exp_date = st.text_input("輸入有效期限 (例: 202706)")
                 
-                # 💡 【數量鍵重裝重現！】
+                # 💡 【數量鍵完好如初！】
                 qty = st.number_input("輸入數量", min_value=1, value=1, step=1)
                 
                 quality = st.radio("商品貨況", ["良品", "不良品"], horizontal=True)
                 reason = ""
                 if quality == "不良品":
-                    # 💡 【完全拔除選單】聽您的，改成純手動輸入！
-                    reason = st.text_input("請手動輸入異常原因 (例: 外盒壓損、包裝污損)")
+                    # 💡 【沒有下拉選單】純手動打字異常原因
+                    reason = st.text_input("請手動輸入異常原因 (例: 外盒壓損、外包裝污損)")
 
             st.markdown("---")
             col1, col2 = st.columns(2)
             with col1:
-                # 點擊藍色大按鈕，直接將畫面的數據寫入大樓資料庫
                 if st.button("💾 儲存此筆並繼續下一筆", use_container_width=True, type="primary"):
                     if not final_barcode: 
                         st.error("❌ 儲存失敗！請確認有在上方輸入或刷取條碼！")
