@@ -1,8 +1,9 @@
 # 檔案名稱：app.py
-import streamlit as st
+import streamlit st
 import sqlite3
 import pandas as pd
 from datetime import datetime
+import streamlit.components.v1 as components
 
 st.set_page_config(page_title="物流退貨點收系統", layout="centered")
 
@@ -144,38 +145,41 @@ else:
             st.info(f"🏬 通路：**{st.session_state['current_channel']}** ｜ 🧾 批號：**{st.session_state['current_batch_id']}**")
             
             # ========================================================
-            # 🟢 【第一步】：先刷商品條碼（徹底拔除 key 參數）
+            # 🟢 【第一步】：先刷商品條碼（主鍵核心區）
             # ========================================================
-            st.markdown("### 📷 第一步：請先刷取商品條碼")
+            st.markdown("### 📷 第一步：請刷取或輸入商品條碼")
             
-            # 💡 【終極修正】：移除一切導致崩潰的 key 參數，純文字顯示與控制
-            import streamlit.components.v1 as components
-            html_value = components.html(
+            # 透過這個安全組件返回的值，直接做為點收紀錄的唯一核心 Barcode KEY
+            barcode_bridge_value = components.html(
                 """
                 <div id="scanner_container" style="position: relative; width: 100%; font-family: sans-serif;">
-                    <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 12px;">
-                        <input type="text" id="barcode_display" placeholder="請點此用藍牙槍刷，或點右側相機掃描" 
+                    
+                    <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 10px;">
+                        <input type="text" id="barcode_display" placeholder="由此手動打字、藍牙槍直接刷，或點右側啟動相機" 
                                style="flex: 1; padding: 14px; font-size: 16px; border: 2px solid #ff4b4b; border-radius: 6px; box-sizing: border-box;">
                         <button id="scan_btn" style="padding: 14px 20px; font-size: 16px; background-color: #ff4b4b; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; white-space: nowrap;">
                             📷 啟動相機
                         </button>
                     </div>
                     
-                    <div id="interactive" class="viewport" style="display: none; position: relative; width: 100%; height: 320px; border: 3px solid #ff4b4b; border-radius: 8px; overflow: hidden; background: #000; margin-bottom: 10px;">
+                    <div id="interactive" class="viewport" style="display: none; position: relative; width: 100%; height: 350px; border: 3px solid #ff4b4b; border-radius: 8px; overflow: hidden; background: #000;">
                         <div style="position: absolute; top: 35%; left: 10%; width: 80%; height: 30%; border: 2px dashed #ffeb3b; background: rgba(255, 235, 59, 0.1); border-radius: 4px; box-sizing: border-box; z-index: 99999; pointer-events: none;"></div>
                         <div style="position: absolute; top: 50% !important; left: 12% !important; width: 76% !important; height: 3px !important; background-color: #ff0000 !important; box-shadow: 0 0 10px #ff0000 !important; z-index: 100000 !important; pointer-events: none;"></div>
                     </div>
                     
-                    <button id="close_btn" style="display: none; margin-bottom: 15px; width: 100%; padding: 10px; background-color: #555; color: white; border: none; border-radius: 4px; font-size: 14px; font-weight: bold;">❌ 關閉相機</button>
+                    <button id="close_btn" style="display: none; margin-top: 10px; width: 100%; padding: 10px; background-color: #555; color: white; border: none; border-radius: 4px; font-size: 14px; font-weight: bold;">❌ 關閉相機</button>
                 </div>
 
                 <style>
-                    #interactive video { 
-                        width: 100% !important; 
-                        height: 100% !important; 
-                        object-fit: contain !important; 
+                    /* 💡 徹底根治相機放大被切掉：將 cover 改為 contain，保留標準大畫面比例，位置超好抓 */
+                    #interactive video {
+                        width: 100% !important;
+                        height: 100% !important;
+                        object-fit: contain !important;
                     }
-                    #interactive canvas { display: none !important; }
+                    #interactive canvas {
+                        display: none !important;
+                    }
                 </style>
 
                 <script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script>
@@ -188,25 +192,32 @@ else:
                     let lastResult = "";
                     let resultCount = 0;
 
-                    function sendToStreamlit(val) {
-                        window.parent.postMessage({ type: 'streamlit:setComponentValue', value: val }, '*');
-                    }
-
+                    // 當輸入框有任何字（藍牙槍/手打），立刻即時回傳給 Python
                     barcodeDisplay.addEventListener('input', (e) => {
-                        sendToStreamlit(e.target.value);
+                        window.parent.postMessage({type: 'streamlit:setComponentValue', value: e.target.value}, '*');
                     });
 
                     scanBtn.addEventListener('click', () => {
                         cameraArea.style.display = 'block';
                         closeBtn.style.display = 'block';
-                        lastResult = ""; resultCount = 0;
+                        lastResult = "";
+                        resultCount = 0;
 
                         Quagga.init({
                             inputStream : {
-                                name : "Live", type : "LiveStream", target: document.querySelector('#interactive'),
-                                constraints: { width: { min: 640, ideal: 1280 }, height: { min: 480, ideal: 960 }, facingMode: "environment" }
+                                name : "Live",
+                                type : "LiveStream",
+                                target: document.querySelector('#interactive'),
+                                constraints: {
+                                    width: { min: 640, ideal: 1280 },
+                                    height: { min: 480, ideal: 960 },
+                                    facingMode: "environment"
+                                }
                             },
-                            locate: true, patchSize: "medium", halfSample: true, frequency: 4,
+                            locate: true,
+                            patchSize: "medium",
+                            halfSample: true,
+                            frequency: 4,
                             decoder : { readers : ["code_128_reader", "ean_reader", "ean_8_reader", "code_39_reader"] }
                         }, function(err) {
                             if (err) { alert("鏡頭開門失敗！"); return; }
@@ -217,44 +228,53 @@ else:
                     Quagga.onDetected(function(data) {
                         if(data.codeResult && data.codeResult.code) {
                             let code = data.codeResult.code;
+                            
                             if (code === lastResult) {
                                 resultCount++;
                                 if (resultCount >= 3) {
                                     barcodeDisplay.value = code;
-                                    sendToStreamlit(code);
+                                    // 刷到條碼，秒同步發射給下方 Python 當主鍵
+                                    window.parent.postMessage({type: 'streamlit:setComponentValue', value: code}, '*');
                                     Quagga.stop();
                                     cameraArea.style.display = 'none';
                                     closeBtn.style.display = 'none';
                                 }
-                            } else { lastResult = code; resultCount = 1; }
+                            } else {
+                                lastResult = code;
+                                resultCount = 1;
+                            }
                         }
                     });
 
                     closeBtn.addEventListener('click', () => {
-                        Quagga.stop(); cameraArea.style.display = 'none'; closeBtn.style.display = 'none';
+                        Quagga.stop();
+                        cameraArea.style.display = 'none';
+                        closeBtn.style.display = 'none';
                     });
                 </script>
                 """,
-                height=110
-                # 💡 這裡已經百分之百沒有任何 key="..." 參數！絕對不會再觸發 TypeError
+                height=110,
+                key="barcode_field" # 綁定通訊密鑰
             )
             
             st.markdown("---")
             
             # ========================================================
-            # 📝 【第二步】：先刷完商品，才在下方設定型態與手打資料
+            # 📝 【第二步】：先刷完商品，才在下方設定型態
             # ========================================================
             st.markdown("### 📝 第二步：請設定該商品的退貨形態與資料")
             
-            received_code = html_value if html_value else ""
+            # 💡 直接拿頂部組件刷出來的條碼當作唯一核心 KEY 條件
+            final_barcode_key = barcode_bridge_value.strip() if barcode_bridge_value else ""
             
-            # 純文字盒，秒秀出剛才刷到的值
-            final_barcode = st.text_input("確認本筆點收條碼", value=received_code, help="相機辨識後會自動帶入此處。亦可直接手動輸入或使用藍牙槍。").strip()
+            if final_barcode_key:
+                st.success(f"📥 目前已鎖定條碼 KEY：**{final_barcode_key}**")
+            else:
+                st.warning("🔍 尚未讀取到條碼，請先在上方輸入或啟動相機掃碼。")
                 
-            # 勾選箱出/散出
             ret_type = st.radio("選擇退貨形態", ["箱出", "散出"], horizontal=True)
             
-            # 💡 箱出免填效期、鎖定數量 1、不分良品不良品
+            # 💡 鐵律卡控：箱出預設良品、鎖定數量 1、免填效期與異常原因
             if ret_type == "箱出":
                 qty = 1
                 exp_date = ""
@@ -262,24 +282,25 @@ else:
                 reason = ""
                 st.caption("💡 箱出模式：數量固定為 1，免填效期，預設良品入庫。")
             else:
-                # 💡 散出模式：數量鍵完美重現、效期框、原因「純手打」
+                # 💡 散出模式：裝回數量鍵、效期框、原因純手打
                 exp_date = st.text_input("輸入有效期限 (例: 202706)")
                 
-                # 💡 【數量鍵完好如初！】
+                # 💡 數量增減鍵完好回歸
                 qty = st.number_input("輸入數量", min_value=1, value=1, step=1)
                 
                 quality = st.radio("商品貨況", ["良品", "不良品"], horizontal=True)
                 reason = ""
                 if quality == "不良品":
-                    # 💡 【沒有下拉選單】純手動打字異常原因
+                    # 💡 聽您的！拒絕死板選單，改為純手動輸入異常原因
                     reason = st.text_input("請手動輸入異常原因 (例: 外盒壓損、外包裝污損)")
-
+            
             st.markdown("---")
             col1, col2 = st.columns(2)
             with col1:
+                # 儲存條件百分之百依賴頂部刷出來的 final_barcode_key
                 if st.button("💾 儲存此筆並繼續下一筆", use_container_width=True, type="primary"):
-                    if not final_barcode: 
-                        st.error("❌ 儲存失敗！請確認有在上方輸入或刷取條碼！")
+                    if not final_barcode_key: 
+                        st.error("❌ 儲存失敗！上方白框內沒有任何條碼數據！")
                     elif ret_type == "散出" and not exp_date: 
                         st.error("❌ 散出模式必須填寫有效期限！")
                     else:
@@ -288,10 +309,10 @@ else:
                         conn.execute("INSERT OR IGNORE INTO return_batches VALUES (?, ?, ?, '作業中')", (st.session_state['current_batch_id'], st.session_state['current_channel'], today_str))
                         seq = conn.execute("SELECT COUNT(*) FROM return_items WHERE batch_id = ?", (st.session_state['current_batch_id'],)).fetchone()[0] + 1
                         conn.execute('''INSERT INTO return_items (batch_id, item_seq, barcode, return_type, expiry_date, quantity, quality_status, damage_reason, operator)
-                                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''', (st.session_state['current_batch_id'], seq, final_barcode, ret_type, exp_date, qty, quality, reason, st.session_state['username']))
+                                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''', (st.session_state['current_batch_id'], seq, final_barcode_key, ret_type, exp_date, qty, quality, reason, st.session_state['username']))
                         conn.commit()
                         conn.close()
-                        st.success(f"✅ 條碼【{final_barcode}】（第 {seq} 筆）已成功入庫！")
+                        st.success(f"✅ 條碼【{final_barcode_key}】（第 {seq} 筆）已成功儲存！")
                         st.rerun()
             with col2:
                 if st.button("🚪 完成點收並離開", use_container_width=True):
