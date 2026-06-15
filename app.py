@@ -157,7 +157,8 @@ else:
                 seq = conn.execute("SELECT COUNT(*) FROM return_items WHERE batch_id = ?", (st.session_state['current_batch_id'],)).fetchone()[0] + 1
                 conn.execute('''INSERT INTO return_items (batch_id, item_seq, barcode, return_type, expiry_date, quantity, quality_status, damage_reason, operator)
                                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''', (st.session_state['current_batch_id'], seq, b_code, r_type, e_date, 1, "良品", "", st.session_state['username']))
-                conn.commit(); conn.close()
+                conn.commit()
+                conn.close()
                 
                 st.query_params.clear()
                 st.success(f"🎉 條碼【{b_code}】已成功儲存入庫（第 {seq} 筆）！")
@@ -172,7 +173,7 @@ else:
             st.markdown("---")
             st.markdown("### 📷 第二步：刷取條碼並直接儲存")
 
-            # 💡 【徹底解決語法衝突】：移除 Python f-string，改用純字串，完美相容 JavaScript 括號！
+            # 純字串內嵌 HTML，完美相容 JavaScript，絕不觸發任何 Python 語法衝突
             components.html(
                 """
                 <div id="scanner_container" style="position: relative; width: 100%; font-family: sans-serif;">
@@ -261,7 +262,7 @@ else:
                         closeBtn.style.display = 'none';
                     });
 
-                    // 💡 安全無損提取：利用瀏覽器原生 API 動態去挖外層 Streamlit 目前勾選的狀態值
+                    // 💡 安全提取：利用瀏覽器 DOM 原生 API 動態去挖取外層 Streamlit 的勾選狀態
                     htmlSaveBtn.addEventListener('click', () => {
                         let val = barcodeDisplay.value.trim();
                         if(!val) {
@@ -269,7 +270,6 @@ else:
                             return;
                         }
                         
-                        // 1. 挖取外層退貨形態的選擇結果
                         let r_type = "箱出";
                         const labels = window.parent.document.querySelectorAll('label');
                         for (let i = 0; i < labels.length; i++) {
@@ -278,11 +278,9 @@ else:
                             }
                         }
                         
-                        // 2. 挖取有效期限輸入框的結果
                         let e_date = "";
                         const inputs = window.parent.document.querySelectorAll('input[type="text"]');
                         for (let i = 0; i < inputs.length; i++) {
-                            // 排除白框本身，抓取外層的效期輸入框
                             if (inputs[i].id !== "barcode_display" && inputs[i].value !== "") {
                                 e_date = inputs[i].value;
                             }
@@ -293,7 +291,6 @@ else:
                             return;
                         }
                         
-                        // 安全跳轉參數重載，實現 100% 入庫
                         let targetUrl = window.parent.location.origin + window.parent.location.pathname + "?save_barcode=" + encodeURIComponent(val) + "&ret_type=" + encodeURIComponent(r_type) + "&exp_date=" + encodeURIComponent(e_date);
                         window.parent.location.href = targetUrl;
                     });
@@ -302,10 +299,15 @@ else:
                 height=420
             )
 
+            # 💡 【核心除錯修復點】：把上一版打錯的單引號與括號完美修復咬死
             if st.button("🚪 完成點收並離開", use_container_width=True):
                 if st.session_state['current_batch_id']:
-                    conn = get_db_connection(); conn.execute("UPDATE return_batches SET status = '已完成' WHERE batch_id = ?", (st.session_state['current_batch_id'],')); conn.commit(); conn.close()
-                st.session_state['current_channel'] = ""; st.rerun()
+                    conn = get_db_connection()
+                    conn.execute("UPDATE return_batches SET status = '已完成' WHERE batch_id = ?", (st.session_state['current_batch_id'],))
+                    conn.commit()
+                    conn.close()
+                st.session_state['current_channel'] = ""
+                st.rerun()
 
     # --- 歷史紀錄分頁 ---
     with tabs[1]:
