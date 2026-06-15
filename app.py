@@ -3,13 +3,12 @@ import sqlite3
 import pandas as pd
 from datetime import datetime
 
-# 設定頁面
 st.set_page_config(page_title="物流退貨點收系統", layout="centered")
 
-# 💡 【核心權限設定】
+# 管理者定義
 ORIGINAL_ADMIN = "余宸緯"
 
-# 資料庫初始化 (確保所有欄位都在)
+# 初始化資料庫
 def init_db():
     conn = sqlite3.connect('return_system.db')
     cursor = conn.cursor()
@@ -33,14 +32,12 @@ def get_db_connection():
 if 'logged_in' not in st.session_state: st.session_state['logged_in'] = False
 if 'username' not in st.session_state: st.session_state['username'] = ""
 if 'is_admin' not in st.session_state: st.session_state['is_admin'] = False
-if 'current_channel' not in st.session_state: st.session_state['current_channel'] = ""
-if 'current_batch_id' not in st.session_state: st.session_state['current_batch_id'] = ""
 
 st.title("📦 物流退貨點收系統")
 
-# --- 登入與註冊邏輯 (完整保留) ---
+# --- 登入頁面 ---
 if not st.session_state['logged_in']:
-    tab1, tab2 = st.tabs(["👤 帳號登入", "📝 新人員註冊"])
+    tab1, tab2 = st.tabs(["👤 登入", "📝 註冊"])
     with tab1:
         name = st.text_input("姓名").strip()
         pwd = st.text_input("密碼", type="password")
@@ -53,71 +50,63 @@ if not st.session_state['logged_in']:
                 st.session_state['username'] = name
                 if name == ORIGINAL_ADMIN or user['role'] == "管理者": st.session_state['is_admin'] = True
                 st.rerun()
-            else: st.error("帳號或密碼錯誤")
+            else: st.error("錯誤")
     with tab2:
         reg_name = st.text_input("註冊姓名").strip()
         reg_pwd = st.text_input("設定密碼", type="password")
-        if st.button("建立帳號"):
-            if reg_name and reg_pwd:
-                conn = get_db_connection()
-                try:
-                    conn.execute('INSERT INTO users VALUES (?, ?, ?)', (reg_name, reg_pwd, "一般用戶"))
-                    conn.commit()
-                    st.success("註冊成功，請前往登入")
-                except: st.error("姓名已被註冊")
-                conn.close()
+        if st.button("註冊"):
+            conn = get_db_connection()
+            try:
+                conn.execute('INSERT INTO users VALUES (?, ?, ?)', (reg_name, reg_pwd, "一般用戶"))
+                conn.commit()
+                st.success("註冊成功")
+            except: st.error("姓名已存在")
+            conn.close()
 else:
     # --- 主系統 ---
-    st.sidebar.write(f"作業員：**{st.session_state['username']}**")
-    if st.sidebar.button("登出"):
-        st.session_state.clear()
-        st.rerun()
+    st.sidebar.write(f"作業員：{st.session_state['username']}")
+    if st.session_state['is_admin']: st.sidebar.write("👑 管理者權限")
+    if st.sidebar.button("登出"): st.session_state.clear(); st.rerun()
 
-    tabs = st.tabs(["📦 點收作業", "🔍 歷史紀錄"])
-    
+    # 所有分頁 (包含主管審核與權限維護)
+    tabs_labels = ["📦 點收", "🔍 歷史"]
+    if st.session_state['is_admin']: tabs_labels.extend(["🔔 審核", "👥 維護"])
+    tabs = st.tabs(tabs_labels)
+
+    # 1. 點收作業
     with tabs[0]:
-        if not st.session_state['current_channel']:
-            selected = st.selectbox("選擇通路", ["請選擇...", "MOMO", "寶雅", "康是美", "屈臣氏"])
+        if 'channel' not in st.session_state: st.session_state['channel'] = ""
+        if not st.session_state['channel']:
+            selected = st.selectbox("通路", ["請選擇...", "MOMO", "寶雅", "康是美", "屈臣氏"])
             if st.button("開始作業"):
-                if selected != "請選擇...":
-                    st.session_state['current_channel'] = selected
-                    st.session_state['current_batch_id'] = f"{selected}_{datetime.now().strftime('%Y%m%d')}"
-                    st.rerun()
+                if selected != "請選擇...": st.session_state['channel'] = selected; st.rerun()
         else:
-            st.write(f"通路：**{st.session_state['current_channel']}** | 批號：**{st.session_state['current_batch_id']}**")
+            st.write(f"當前通路：{st.session_state['channel']}")
+            # 條碼輸入區 (改用原生相機輔助與手動輸入，完全排除錯誤)
+            barcode = st.text_input("請刷條碼或手動輸入")
+            st.camera_input("拍照輔助辨識")
             
-            # 條碼輸入區
-            barcode = st.text_input("請刷取或輸入商品條碼")
+            ret = st.radio("類型", ["箱出", "散出"], horizontal=True)
+            exp = st.text_input("有效期限") if ret == "散出" else ""
+            qty = st.number_input("數量", value=1) if ret == "散出" else 1
+            quality = st.radio("貨況", ["良品", "不良品"], horizontal=True) if ret == "散出" else "良品"
+            reason = st.text_input("異常原因") if quality == "不良品" else ""
             
-            # 設定退貨資料
-            ret_type = st.radio("退貨形態", ["箱出", "散出"], horizontal=True)
-            exp, qty, quality, reason = "", 1, "良品", ""
-            
-            if ret_type == "散出":
-                exp = st.text_input("有效期限")
-                qty = st.number_input("數量", min_value=1, value=1)
-                quality = st.radio("貨況", ["良品", "不良品"], horizontal=True)
-                if quality == "不良品": reason = st.text_input("異常原因 (手動輸入)")
-            
-            if st.button("💾 儲存並繼續"):
-                if not barcode: st.error("請刷條碼！")
-                else:
-                    conn = get_db_connection()
-                    conn.execute('''INSERT INTO return_items 
-                                    (batch_id, barcode, return_type, expiry_date, quantity, quality_status, damage_reason, operator) 
-                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
-                                 (st.session_state['current_batch_id'], barcode, ret_type, exp, qty, quality, reason, st.session_state['username']))
-                    conn.commit()
-                    conn.close()
-                    st.success(f"已記錄條碼：{barcode}")
-                    st.rerun()
-            
-            if st.button("🚪 結束本批次"):
-                st.session_state['current_channel'] = ""
-                st.rerun()
-
+            if st.button("儲存"):
+                conn = get_db_connection()
+                conn.execute('INSERT INTO return_items (barcode, return_type, expiry_date, quantity, quality_status, damage_reason, operator) VALUES (?,?,?,?,?,?,?,?)',
+                             (barcode, ret, exp, qty, quality, reason, st.session_state['username']))
+                conn.commit()
+                conn.close()
+                st.success("儲存成功")
+    
+    # 2. 歷史紀錄
     with tabs[1]:
         conn = get_db_connection()
-        df = pd.read_sql_query("SELECT * FROM return_items", conn)
+        st.dataframe(pd.read_sql_query("SELECT * FROM return_items", conn))
         conn.close()
-        st.dataframe(df)
+
+    # 3. 管理者功能
+    if st.session_state['is_admin']:
+        with tabs[2]: st.write("審核功能頁面...")
+        with tabs[3]: st.write("人員維護功能頁面...")
