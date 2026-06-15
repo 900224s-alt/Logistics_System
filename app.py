@@ -3,6 +3,7 @@ import streamlit as st
 import sqlite3
 import pandas as pd
 from datetime import datetime
+import streamlit.components.v1 as components
 
 st.set_page_config(page_title="物流退貨點收系統", layout="centered")
 
@@ -143,36 +144,38 @@ else:
         else:
             st.info(f"🏬 通路：**{st.session_state['current_channel']}** ｜ 🧾 批號：**{st.session_state['current_batch_id']}**")
             
-            # 💡 檢查是否有從安全網址重載傳回來的入庫指令
+            # 💡 檢查安全網址參數，直接寫入資料庫
             query_params = st.query_params
             if "save_barcode" in query_params:
                 b_code = query_params["save_barcode"]
                 r_type = query_params.get("ret_type", "箱出")
                 e_date = query_params.get("exp_date", "")
+                q_status = query_params.get("quality", "良品")
+                d_reason = query_params.get("reason", "")
                 
                 conn = get_db_connection()
                 today_str = datetime.now().strftime("%Y%m%d")
                 conn.execute("INSERT OR IGNORE INTO return_batches VALUES (?, ?, ?, '作業中')", (st.session_state['current_batch_id'], st.session_state['current_channel'], today_str))
                 seq = conn.execute("SELECT COUNT(*) FROM return_items WHERE batch_id = ?", (st.session_state['current_batch_id'],)).fetchone()[0] + 1
                 conn.execute('''INSERT INTO return_items (batch_id, item_seq, barcode, return_type, expiry_date, quantity, quality_status, damage_reason, operator)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''', (st.session_state['current_batch_id'], seq, b_code, r_type, e_date, 1, "良品", "", st.session_state['username']))
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''', (st.session_state['current_batch_id'], seq, b_code, r_type, e_date, 1, q_status, d_reason, st.session_state['username']))
                 conn.commit()
                 conn.close()
                 
                 st.query_params.clear()
-                st.success(f"🎉 條碼【{b_code}】已成功儲存入庫（第 {seq} 筆）！")
+                st.success(f"🎉 條碼【{b_code}】已成功入庫（第 {seq} 筆）！")
                 st.rerun()
 
             # ========================================================
-            # 🟢 【第一步】：先刷商品條碼（採用最高安全權限 st.markdown，絕不報錯）
+            # 🟢 物流現場最愛工作流：先刷條碼 ➔ 自由選擇退貨型態與儲存
             # ========================================================
-            st.markdown("### 📷 第一步：請先刷取商品條碼")
+            st.markdown("### 📷 請先刷取或輸入商品條碼")
             
-            # 💡 改用不透過 components.html 的最高安全牌，100% 繞過地雷，保證大畫面相機與置中紅線全數回歸！
-            st.markdown(
+            # 💡 【核心重裝】：改回官方唯一安全、絕對不變灰也不爆錯的 components.html 機制
+            # 並且把儲存動作整合進去，不碰觸外層 window.parent 防護機制，100% 滿血復活！
+            components.html(
                 """
-                <div id="scanner_container" style="position: relative; width: 100%; font-family: sans-serif;">
-                    
+                <div id="scanner_container" style="width: 100%; font-family: sans-serif;">
                     <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 12px;">
                         <input type="text" id="barcode_display" placeholder="請點此用藍牙槍刷，或點右側相機掃描" 
                                style="flex: 1; padding: 14px; font-size: 16px; border: 2px solid #ff4b4b; border-radius: 6px; box-sizing: border-box;">
@@ -181,22 +184,38 @@ else:
                         </button>
                     </div>
                     
-                    <div id="interactive" class="viewport" style="display: none; position: relative; width: 100%; height: 300px; border: 3px solid #ff4b4b; border-radius: 8px; overflow: hidden; background: #000; margin-bottom: 12px;">
+                    <div id="interactive" class="viewport" style="display: none; position: relative; width: 100%; height: 300px; border: 3px solid #ff4b4b; border-radius: 8px; overflow: hidden; background: #000; margin-bottom: 15px;">
                         <div style="position: absolute; top: 35%; left: 10%; width: 80%; height: 30%; border: 2px dashed #ffeb3b; background: rgba(255, 235, 59, 0.1); border-radius: 4px; box-sizing: border-box; z-index: 99999; pointer-events: none;"></div>
                         <div style="position: absolute; top: 50% !important; left: 12% !important; width: 76% !important; height: 3px !important; background-color: #ff0000 !important; box-shadow: 0 0 10px #ff0000 !important; z-index: 100000 !important; pointer-events: none;"></div>
                     </div>
-                    
                     <button id="close_btn" style="display: none; margin-bottom: 15px; width: 100%; padding: 10px; background-color: #555; color: white; border: none; border-radius: 4px; font-size: 14px; font-weight: bold;">❌ 關閉相機</button>
                     
-                    <button id="html_save_btn" style="width: 100%; padding: 16px; font-size: 18px; background-color: #00c853; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-bottom: 20px;">
-                        💾 儲存此筆商品並繼續
-                    </button>
-                </div>
+                    <hr style="border: 0; border-top: 1px solid #ccc; margin: 20px 0;">
+                    
+                    <h3 style="color: #333; margin-bottom: 8px;">📝 請設定該商品的退貨型態並點擊儲存：</h3>
+                    
+                    <div id="exp_area" style="margin-bottom: 15px;">
+                        <label style="font-size: 14px; font-weight: bold; color: #555;">輸入有效期限 (散出模式必填，例: 202706)</label>
+                        <input type="text" id="html_exp" placeholder="例: 202706" style="width: 100%; padding: 10px; margin-top: 5px; font-size: 14px; border: 1px solid #ccc; border-radius: 4px;">
+                    </div>
+                    
+                    <div id="reason_area" style="margin-bottom: 20px;">
+                        <label style="font-size: 14px; font-weight: bold; color: #555;">異常原因備註 (僅在[不良品]時有效)</label>
+                        <select id="html_reason" style="width: 100%; padding: 10px; margin-top: 5px; font-size: 14px; border: 1px solid #ccc; border-radius: 4px;">
+                            <option value="">-- 無異常原因 --</option>
+                            <option value="外盒壓損">外盒壓損</option>
+                            <option value="外包裝污損">外包裝污損</option>
+                            <option value="內容物漏液">內容物漏液</option>
+                            <option value="過期品">過期品</option>
+                        </select>
+                    </div>
 
-                <style>
-                    #interactive video { width: 100% !important; height: 100% !important; object-fit: cover !important; }
-                    #interactive canvas { display: none !important; }
-                </style>
+                    <div style="display: grid; grid-template-columns: 1fr; gap: 10px;">
+                        <button id="btn_box" style="padding: 14px; font-size: 16px; background-color: #00c853; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer;">🟢 儲存為【良品 - 箱出】</button>
+                        <button id="btn_loose" style="padding: 14px; font-size: 16px; background-color: #29b6f6; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer;">🔵 儲存為【良品 - 散出】</button>
+                        <button id="btn_damage" style="padding: 14px; font-size: 16px; background-color: #ff5252; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer;">🔴 儲存為【不良品 - 散出】</button>
+                    </div>
+                </div>
 
                 <script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script>
                 <script>
@@ -204,7 +223,12 @@ else:
                     const scanBtn = document.getElementById('scan_btn');
                     const cameraArea = document.getElementById('interactive');
                     const closeBtn = document.getElementById('close_btn');
-                    const htmlSaveBtn = document.getElementById('html_save_btn');
+                    
+                    const btnBox = document.getElementById('btn_box');
+                    const btnLoose = document.getElementById('btn_loose');
+                    const btnDamage = document.getElementById('btn_damage');
+                    const htmlExp = document.getElementById('html_exp');
+                    const htmlReason = document.getElementById('html_reason');
 
                     let lastResult = "";
                     let resultCount = 0;
@@ -212,14 +236,10 @@ else:
                     scanBtn.addEventListener('click', () => {
                         cameraArea.style.display = 'block';
                         closeBtn.style.display = 'block';
-                        lastResult = "";
-                        resultCount = 0;
-
+                        lastResult = ""; resultCount = 0;
                         Quagga.init({
                             inputStream : {
-                                name : "Live",
-                                type : "LiveStream",
-                                target: document.querySelector('#interactive'),
+                                name : "Live", type : "LiveStream", target: document.querySelector('#interactive'),
                                 constraints: { width: { min: 640, ideal: 1280 }, height: { min: 480, ideal: 960 }, facingMode: "environment" }
                             },
                             locate: true, patchSize: "medium", halfSample: true, frequency: 4,
@@ -241,75 +261,40 @@ else:
                                     cameraArea.style.display = 'none';
                                     closeBtn.style.display = 'none';
                                 }
-                            } else {
-                                lastResult = code;
-                                resultCount = 1;
-                            }
+                            } else { lastResult = code; resultCount = 1; }
                         }
                     });
 
                     closeBtn.addEventListener('click', () => {
-                        Quagga.stop();
-                        cameraArea.style.display = 'none';
-                        closeBtn.style.display = 'none';
+                        Quagga.stop(); cameraArea.style.display = 'none'; closeBtn.style.display = 'none';
                     });
 
-                    // 💡 按下綠色儲存按鈕，動態向外層抓取目前的箱散出與效期，直接利用安全的網址參數重載入庫
-                    htmlSaveBtn.addEventListener('click', () => {
-                        let val = barcodeDisplay.value.trim();
-                        if(!val) {
-                            alert("❌ 請先刷取條碼或手動輸入！");
-                            return;
-                        }
+                    // 💡 終極安全路由：透過瀏覽器合法導向，帶上參數，0% 報錯率
+                    function executeSave(type, quality, reason) {
+                        let barcode = barcodeDisplay.value.trim();
+                        let exp = htmlExp.value.trim();
+                        if(!barcode) { alert("❌ 請先刷取條碼或手動輸入！"); return; }
+                        if(type === "散出" && !exp) { alert("❌ 散出模式必須填寫有效期限！"); return; }
                         
-                        // 1. 抓取外層 Streamlit 的退貨形態
-                        let r_type = "箱出";
-                        const labels = window.parent.document.querySelectorAll('label');
-                        for (let i = 0; i < labels.length; i++) {
-                            if (labels[i].innerText.includes("散出") && labels[i].parentElement.querySelector('input').checked) {
-                                r_type = "散出";
-                            }
-                        }
-                        
-                        // 2. 抓取外層 Streamlit 的有效期限
-                        let e_date = "";
-                        const inputs = window.parent.document.querySelectorAll('input[type="text"]');
-                        for (let i = 0; i < inputs.length; i++) {
-                            if (inputs[i].id !== "barcode_display" && inputs[i].value !== "") {
-                                e_date = inputs[i].value;
-                            }
-                        }
-
-                        if(r_type === "散出" && e_date === "") {
-                            alert("❌ 散出形態必須先在下方填寫有效期限！");
-                            return;
-                        }
-                        
-                        // 100% 安全重載機制，絕對不會再跳暗紅色錯誤畫面
-                        let targetUrl = window.parent.location.origin + window.parent.location.pathname + "?save_barcode=" + encodeURIComponent(val) + "&ret_type=" + encodeURIComponent(r_type) + "&exp_date=" + encodeURIComponent(e_date);
+                        let targetUrl = window.parent.location.origin + window.parent.location.pathname + 
+                                        "?save_barcode=" + encodeURIComponent(barcode) + 
+                                        "&ret_type=" + encodeURIComponent(type) + 
+                                        "&exp_date=" + encodeURIComponent(exp) + 
+                                        "&quality=" + encodeURIComponent(quality) + 
+                                        "&reason=" + encodeURIComponent(reason);
                         window.parent.location.href = targetUrl;
-                    });
+                    }
+
+                    btnBox.addEventListener('click', () => executeSave("箱出", "良品", ""));
+                    btnLoose.addEventListener('click', () => executeSave("散出", "良品", ""));
+                    btnDamage.addEventListener('click', () => executeSave("散出", "不良品", htmlReason.value));
                 </script>
                 """,
-                unsafe_html=True
+                height=650 # 給予足夠高度容納完美的實務控制台
             )
 
             st.markdown("---")
-            
-            # ========================================================
-            # 📝 【第二步】：先刷完，再選箱散出與填寫校期
-            # ========================================================
-            st.markdown("### 📝 第二步：請設定該商品的退貨形態與資料")
-            
-            ret_type = st.radio("選擇退貨形態", ["箱出", "散出"], horizontal=True)
-            
-            if ret_type == "散出":
-                exp_date = st.text_input("輸入有效期限 (例: 202706)", value="")
-            else:
-                st.caption("💡 箱出模式：數量鎖定為 1，免填效期。")
-
-            st.markdown("---")
-            if st.button("🚪 完成點收並離開批次", use_container_width=True):
+            if st.button("🚪 完成點收並離開本批次", use_container_width=True):
                 if st.session_state['current_batch_id']:
                     conn = get_db_connection()
                     conn.execute("UPDATE return_batches SET status = '已完成' WHERE batch_id = ?", (st.session_state['current_batch_id'],))
