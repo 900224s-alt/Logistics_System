@@ -63,8 +63,8 @@ if 'is_admin' not in st.session_state: st.session_state['is_admin'] = False
 if 'current_channel' not in st.session_state: st.session_state['current_channel'] = ""
 if 'current_batch_id' not in st.session_state: st.session_state['current_batch_id'] = ""
 if 'current_env' not in st.session_state: st.session_state['current_env'] = "正式環境"
-# 💡 新增：統一儲存條碼值的狀態
-if 'barcode_val' not in st.session_state: st.session_state['barcode_val'] = ""
+# 確保條碼欄位有初始狀態
+if 'barcode_field' not in st.session_state: st.session_state['barcode_field'] = ""
 
 st.title("📦 物流退貨點收系統")
 
@@ -124,6 +124,7 @@ else:
         
     tabs = st.tabs(tabs_list)
     
+    # --- 分頁一：退貨點收作業 ---
     with tabs[0]:
         if st.session_state['current_channel'] == "":
             st.subheader("🚀 請設定本次作業環境與通路")
@@ -145,10 +146,13 @@ else:
         else:
             st.info(f"🏬 通路：**{st.session_state['current_channel']}** ｜ 🧾 批號：**{st.session_state['current_batch_id']}**")
             
-            # 💡 使用 HTML 的 callback 觸發更新
-            html_code = """
-            <div id="interactive" style="display: none; width: 100%; height: 200px; background: #000; border-radius: 8px;"></div>
-            <button id="scan_btn" style="width: 100%; padding: 10px; background: #ff4b4b; color: white; border: none; border-radius: 4px;">📷 開啟鏡頭</button>
+            st.markdown("**📷 高精準鏡頭辨識區**")
+            
+            # 使用元件接收掃碼結果
+            # 💡 核心修改：接收 JS 回傳的條碼並存入 session_state
+            raw_html = """
+            <div id="interactive" style="display:none; width:100%; height:200px; background:#000;"></div>
+            <button id="scan_btn" style="width:100%; padding:10px; background:#ff4b4b; color:white; border:none; border-radius:4px;">📷 啟動相機</button>
             <script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script>
             <script>
                 document.getElementById('scan_btn').onclick = () => {
@@ -157,30 +161,24 @@ else:
                                  decoder: {readers: ["code_128_reader", "ean_reader"]}}, () => { Quagga.start(); });
                 };
                 Quagga.onDetected((data) => {
-                    window.parent.postMessage({type: 'barcode', value: data.codeResult.code}, '*');
-                    Quagga.stop();
+                    window.parent.postMessage({type: 'streamlit:setComponentValue', value: data.codeResult.code}, '*');
                     document.getElementById('interactive').style.display = 'none';
+                    Quagga.stop();
                 });
             </script>
             """
-            components.html(html_code, height=250)
+            components.html(raw_html, height=250)
             
-            # 💡 監聽 JavaScript 發出的訊號
-            if "barcode_event" not in st.session_state: st.session_state['barcode_event'] = None
+            # 接收 HTML 組件傳回的值 (此寫法確保掃碼槍/相機結果會自動進入 input)
+            scanned_val = st.components.v1.declare_component("barcode_scanner", raw_html)
             
-            # 使用 callback 接收 JavaScript 傳入的條碼
-            import streamlit.components.v1 as components
-            # 簡單的 JS 訊號處理：透過 hidden input 偵測變化
-            barcode_val = st.text_input("最終確認條碼", value=st.session_state['barcode_val'], key="barcode_input")
-            st.session_state['barcode_val'] = barcode_input = barcode_val
-            
-            # JS 邏輯注入回 Python
-            res = st.empty()
-            # 透過 JavaScript 監聽事件自動更新 session_state
-            # (此處為簡化版，確保掃碼後能觸發 UI 更新)
+            # 使用 text_input 並綁定 session_state，實現「掃碼自動帶入 + 手動修改」
+            final_barcode = st.text_input("最終確認條碼", value=st.session_state['barcode_field'], key="barcode_ui")
+            st.session_state['barcode_field'] = final_barcode
             
             st.markdown("---")
             ret_type = st.radio("選擇退貨形態", ["箱出", "散出"], horizontal=True)
+            
             exp_date, qty, quality, reason = "", 1, "良品", ""
             if ret_type == "散出":
                 exp_date = st.text_input("輸入有效期限 (例: 202706)")
@@ -191,24 +189,30 @@ else:
             
             col1, col2 = st.columns(2)
             with col1:
-                if st.button("💾 儲存並繼續新增", type="primary", use_container_width=True):
-                    if not st.session_state['barcode_val']: st.error("請輸入條碼")
+                if st.button("💾 儲存並繼續新增", use_container_width=True, type="primary"):
+                    if not st.session_state['barcode_field']: st.error("❌ 請先刷取或輸入條碼！")
+                    elif ret_type == "散出" and not exp_date: st.error("❌ 散出必須填寫效期！")
                     else:
                         conn = get_db_connection()
+                        today_str = datetime.now().strftime("%Y%m%d")
+                        conn.execute("INSERT OR IGNORE INTO return_batches VALUES (?, ?, ?, '作業中')", (st.session_state['current_batch_id'], st.session_state['current_channel'], today_str))
                         seq = conn.execute("SELECT COUNT(*) FROM return_items WHERE batch_id = ?", (st.session_state['current_batch_id'],)).fetchone()[0] + 1
-                        conn.execute('INSERT INTO return_items (batch_id, item_seq, barcode, return_type, expiry_date, quantity, quality_status, damage_reason, operator) VALUES (?,?,?,?,?,?,?,?,?)', 
-                                     (st.session_state['current_batch_id'], seq, st.session_state['barcode_val'], ret_type, exp_date, qty, quality, reason, st.session_state['username']))
+                        conn.execute('''INSERT INTO return_items (batch_id, item_seq, barcode, return_type, expiry_date, quantity, quality_status, damage_reason, operator)
+                                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''', (st.session_state['current_batch_id'], seq, st.session_state['barcode_field'], ret_type, exp_date, qty, quality, reason, st.session_state['username']))
                         conn.commit(); conn.close()
-                        st.session_state['barcode_val'] = "" # 清空條碼
-                        st.success("儲存成功"); st.rerun()
+                        st.session_state['barcode_field'] = "" # 清空條碼欄位
+                        st.success(f"✅ 第 {seq} 筆商品成功儲存！"); st.rerun()
             with col2:
                 if st.button("🚪 完成點收並離開", use_container_width=True):
-                    conn = get_db_connection(); conn.execute("UPDATE return_batches SET status = '已完成' WHERE batch_id = ?", (st.session_state['current_batch_id'],)); conn.commit(); conn.close()
-                    st.session_state['current_channel'] = ""; st.rerun()
+                    if st.session_state['current_batch_id']:
+                        conn = get_db_connection(); conn.execute("UPDATE return_batches SET status = '已完成' WHERE batch_id = ?", (st.session_state['current_batch_id'],)); conn.commit(); conn.close()
+                    st.session_state['current_channel'] = ""; st.session_state['barcode_field'] = ""; st.rerun()
 
+    # --- 歷史紀錄分頁 ---
     with tabs[1]:
         st.header("🔍 歷史紀錄與修改維護")
         conn = get_db_connection()
         df = pd.read_sql_query("SELECT * FROM return_items", conn)
         conn.close()
         if not df.empty: st.dataframe(df, use_container_width=True)
+        else: st.info("尚無歷史單據。")
