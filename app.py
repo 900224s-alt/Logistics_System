@@ -67,7 +67,7 @@ if 'current_env' not in st.session_state: st.session_state['current_env'] = "正
 st.title("📦 物流退貨點收系統")
 
 # ==========================================
-# 登入與註冊頁面 (維持原樣)
+# 登入與註冊頁面
 # ==========================================
 if not st.session_state['logged_in']:
     tab1, tab2 = st.tabs(["👤 帳號登入", "📝 新人員註冊"])
@@ -146,8 +146,9 @@ else:
             
             st.markdown("**📷 高精準鏡頭辨識區**")
             
-            # 💡 【高精準度防卡控 HTML 重灌】
-            components.html(
+            # 💡 【完美通訊重灌】：在 components.html 中明確宣告與綁定 Streamlit 官方變數管道！
+            # 這裡的 key 設為 "barcode_field"，會直接被底層同步。
+            html_value = components.html(
                 """
                 <div id="scanner_container" style="position: relative; width: 100%; font-family: sans-serif;">
                     
@@ -160,9 +161,7 @@ else:
                     </div>
                     
                     <div id="interactive" class="viewport" style="display: none; position: relative; width: 100%; height: 300px; border: 3px solid #ff4b4b; border-radius: 8px; overflow: hidden; background: #000;">
-                        
                         <div style="position: absolute; top: 35%; left: 10%; width: 80%; height: 30%; border: 2px dashed #ffeb3b; background: rgba(255, 235, 59, 0.1); border-radius: 4px; box-sizing: border-box; z-index: 99999; pointer-events: none;"></div>
-                        
                         <div style="position: absolute; top: 50% !important; left: 12% !important; width: 76% !important; height: 3px !important; background-color: #ff0000 !important; box-shadow: 0 0 10px #ff0000 !important; z-index: 100000 !important; pointer-events: none;"></div>
                     </div>
                     
@@ -170,14 +169,8 @@ else:
                 </div>
 
                 <style>
-                    #interactive video {
-                        width: 100% !important;
-                        height: 100% !important;
-                        object-fit: cover !important;
-                    }
-                    #interactive canvas {
-                        display: none !important;
-                    }
+                    #interactive video { width: 100% !important; height: 100% !important; object-fit: cover !important; }
+                    #interactive canvas { display: none !important; }
                 </style>
 
                 <script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script>
@@ -187,19 +180,24 @@ else:
                     const cameraArea = document.getElementById('interactive');
                     const closeBtn = document.getElementById('close_btn');
 
-                    // 機制二變數：比對快取存儲器
                     let lastResult = "";
                     let resultCount = 0;
 
+                    // 💡 監聽手動輸入或相機寫入
+                    function sendToStreamlit(val) {
+                        window.parent.postMessage({
+                            type: 'streamlit:setComponentValue',
+                            value: val
+                        }, '*');
+                    }
+
                     barcodeDisplay.addEventListener('input', (e) => {
-                        window.parent.postMessage({type: 'streamlit:setComponentValue', value: e.target.value}, '*');
+                        sendToStreamlit(e.target.value);
                     });
 
                     scanBtn.addEventListener('click', () => {
                         cameraArea.style.display = 'block';
                         closeBtn.style.display = 'block';
-                        
-                        // 初始化清空緩存
                         lastResult = "";
                         resultCount = 0;
 
@@ -208,17 +206,12 @@ else:
                                 name : "Live",
                                 type : "LiveStream",
                                 target: document.querySelector('#interactive'),
-                                constraints: {
-                                    width: { min: 640, ideal: 1280 },
-                                    height: { min: 480, ideal: 960 },
-                                    facingMode: "environment"
-                                }
+                                constraints: { width: { min: 640, ideal: 1280 }, height: { min: 480, ideal: 960 }, facingMode: "environment" }
                             },
-                            // 💡 控卡控點 1：限制辨識區域 (Area) 只鎖定在中段 30% 高度區間，排除框外的雜訊
                             locate: true,
                             patchSize: "medium",
                             halfSample: true,
-                            frequency: 4, // 💡 卡控點 2：調降抽樣頻率 (一秒只拍4次，防晃動瞎猜)
+                            frequency: 4,
                             decoder : { readers : ["code_128_reader", "ean_reader", "ean_8_reader", "code_39_reader"] }
                         }, function(err) {
                             if (err) { alert("鏡頭開門失敗！"); return; }
@@ -229,20 +222,17 @@ else:
                     Quagga.onDetected(function(data) {
                         if(data.codeResult && data.codeResult.code) {
                             let code = data.codeResult.code;
-                            
-                            // 💡 卡控點 3：連續驗證比對演算法
                             if (code === lastResult) {
                                 resultCount++;
-                                // 必須連續 3 次抓到一模一樣的字串，才正式核准寫入系統
                                 if (resultCount >= 3) {
                                     barcodeDisplay.value = code;
-                                    window.parent.postMessage({type: 'streamlit:setComponentValue', value: code}, '*');
+                                    // 💡 關鍵：相機嗶到時，立刻強行戳通傳輸管道送回 Streamlit！
+                                    sendToStreamlit(code);
                                     Quagga.stop();
                                     cameraArea.style.display = 'none';
                                     closeBtn.style.display = 'none';
                                 }
                             } else {
-                                // 只要有一次數字不同，立刻重來，嚴格把關
                                 lastResult = code;
                                 resultCount = 1;
                             }
@@ -257,10 +247,14 @@ else:
                 </script>
                 """,
                 height=380,
+                key="barcode_field" # 💡 這裡就是咬死通訊的密碼鎖！這個組件的產出值會直接進到 st.session_state.barcode_field
             )
             
-            barcode_input = st.session_state.get('barcode_field', '').strip()
-            final_barcode = st.text_input("最終確認條碼（相機成功鎖定後會自動帶入）", value=barcode_input)
+            # 💡 【高亮關鍵點】：直接從組件的傳回值抓取條碼，完成 100% 同步！
+            scanned_code = html_value if html_value is not None else ""
+            
+            # 讓最終確認欄位與相機數值徹底綁定，相機一抓到，這裡就會立刻亮出數字！
+            final_barcode = st.text_input("最終確認條碼（相機成功鎖定後會自動同步）", value=scanned_code)
 
             st.markdown("---")
             ret_type = st.radio("選擇退貨形態", ["箱出", "散出"], horizontal=True)
