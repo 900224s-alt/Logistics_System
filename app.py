@@ -5,15 +5,26 @@ from datetime import datetime
 
 st.set_page_config(layout="wide")
 
-# 1. 資料庫連線 (使用絕對路徑以確保穩定)
-def get_data(table_name):
+# 強制重新定義與補齊資料庫欄位
+def init_db():
     conn = sqlite3.connect('return_system.db')
-    # 直接讀取整張表，完全不使用 WHERE 條件，避開 SQL 語法解析錯誤
-    df = pd.read_sql_query(f"SELECT * FROM {table_name}", conn)
-    conn.close()
-    return df
+    c = conn.cursor()
+    # 確保 users 表
+    c.execute('CREATE TABLE IF NOT EXISTS users (username TEXT PRIMARY KEY, role TEXT)')
+    # 確保 return_items 表有所有必要的欄位
+    c.execute('''CREATE TABLE IF NOT EXISTS return_items (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, 
+                    barcode TEXT, quality_status TEXT, damage_reason TEXT, 
+                    operator TEXT, approved TEXT DEFAULT '待簽核'
+                )''')
+    # 嘗試寫入管理員
+    try: c.execute("INSERT INTO users VALUES ('余宸緯', '管理者')")
+    except: pass
+    conn.commit(); conn.close()
 
-# 2. 登入與權限 (鎖定您的名稱)
+init_db()
+
+# 簡單的登入判定
 if 'logged_in' not in st.session_state:
     st.session_state.update({'logged_in': False, 'username': "", 'is_admin': False})
 
@@ -32,31 +43,35 @@ else:
         if st.button("儲存"):
             conn = sqlite3.connect('return_system.db')
             conn.execute('INSERT INTO return_items (barcode, quality_status, operator) VALUES (?,?,?)', 
-                         (bc, "不良品", st.session_state['username']))
+                         (bc, "不良品" if "不良" in bc else "良品", st.session_state['username']))
             conn.commit(); conn.close(); st.rerun()
 
-    with tabs[1]: # 歷史
-        df = get_data('return_items')
-        # 在 Python 端篩選，而不是在 SQL 端篩選，確保不會報錯
+    with tabs[1]: # 歷史紀錄 (不做任何 SQL 篩選)
+        conn = sqlite3.connect('return_system.db')
+        df = pd.read_sql("SELECT * FROM return_items", conn)
+        conn.close()
         st.dataframe(df, use_container_width=True, hide_index=True)
 
-    with tabs[2]: # 簽核 (手動篩選)
+    with tabs[2]: # 簽核
         if st.session_state['is_admin']:
-            df = get_data('return_items')
-            # 透過 Pandas 篩選出不良品與待簽核
-            df_bad = df[(df['quality_status'] == '不良品') & (df['approved'] == '待簽核')]
-            
-            df_bad['簽核'] = False
-            edited = st.data_editor(df_bad, hide_index=True, column_config={"簽核": st.column_config.CheckboxColumn()})
-            
-            if st.button("執行簽核"):
-                conn = sqlite3.connect('return_system.db')
-                for i, row in edited.iterrows():
-                    if row['簽核']:
-                        conn.execute("UPDATE return_items SET approved='已簽核' WHERE id=?", (int(row['id']),))
-                conn.commit(); conn.close(); st.rerun()
+            conn = sqlite3.connect('return_system.db')
+            df = pd.read_sql("SELECT * FROM return_items", conn)
+            conn.close()
+            # 在 Python 端篩選，避免 SQL 語法錯誤
+            if 'quality_status' in df.columns:
+                df_bad = df[(df['quality_status'] == '不良品') & (df['approved'] == '待簽核')].copy()
+                df_bad['簽核'] = False
+                edited = st.data_editor(df_bad, hide_index=True, column_config={"簽核": st.column_config.CheckboxColumn()})
+                if st.button("執行簽核"):
+                    conn = sqlite3.connect('return_system.db')
+                    for i, row in edited.iterrows():
+                        if row['簽核']: conn.execute("UPDATE return_items SET approved='已簽核' WHERE id=?", (int(row['id']),))
+                    conn.commit(); conn.close(); st.rerun()
+            else: st.warning("資料欄位異常，請重啟系統")
 
-    with tabs[3]: # 人員管理
+    with tabs[3]: # 人員
         if st.session_state['is_admin']:
-            df_users = get_data('users')
-            st.dataframe(df_users, hide_index=True)
+            conn = sqlite3.connect('return_system.db')
+            users = pd.read_sql("SELECT * FROM users", conn)
+            conn.close()
+            st.dataframe(users, hide_index=True)
