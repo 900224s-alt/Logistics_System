@@ -216,11 +216,11 @@ else:
                         conn = get_db_connection(); conn.execute("UPDATE return_batches SET status = '已完成' WHERE batch_id = ?", (st.session_state['current_batch_id'],)); conn.commit(); conn.close()
                     st.session_state['current_channel'] = ""; st.rerun()
 
-    # --- 歷史紀錄分頁 (修正版) ---
+   # --- 歷史紀錄分頁 (修正版) ---
     with tabs[1]:
         st.header("🔍 歷史紀錄與篩選")
         
-        # 💡 瓶頸4：篩選區域
+        # 篩選區域
         with st.expander("📊 篩選查詢條件", expanded=True):
             col_f1, col_f2, col_f3 = st.columns(3)
             with col_f1: start_date = st.date_input("起始日期", value=None)
@@ -228,31 +228,46 @@ else:
             with col_f3: filter_op = st.text_input("篩選作業員")
 
         conn = get_db_connection()
-        # 💡 瓶頸2：Join 批次表以獲取建檔日期，並顯示為日期格式
+        # 聯集查詢資料
         df = pd.read_sql_query("""
-            SELECT b.create_date AS '建檔日期', i.* FROM return_items i 
+            SELECT b.create_date, i.* FROM return_items i 
             LEFT JOIN return_batches b ON i.batch_id = b.batch_id
         """, conn)
         conn.close()
 
         if not df.empty:
-            # 轉換日期格式
+            # 1. 處理日期與欄位順序
             df['建檔日期'] = pd.to_datetime(df['create_date']).dt.strftime('%Y/%m/%d')
+            # 調整欄位順序：將建檔日期放到最前面
+            cols = ['建檔日期'] + [c for c in df.columns if c not in ['建檔日期', 'create_date']]
+            df = df[cols]
             
-            # 💡 瓶頸3：防止科學記號 (加上單引號讓 Excel 視為文字)
+            # 2. 處理條碼格式 (避免科學記號)
             df['barcode'] = df['barcode'].astype(str).apply(lambda x: f"'{x}")
             
-            # 應用篩選邏輯
-            if filter_barcode: df = df[df['barcode'].str.contains(filter_barcode)]
-            if filter_op: df = df[df['operator'].str.contains(filter_op)]
+            # 3. 執行篩選邏輯 (即時自動更新)
+            if start_date:
+                df = df[df['建檔日期'] >= start_date.strftime('%Y/%m/%d')]
+            if filter_barcode:
+                df = df[df['barcode'].str.contains(filter_barcode)]
+            if filter_op:
+                df = df[df['operator'].str.contains(filter_op)]
             
-            st.dataframe(df, use_container_width=True)
+            # 4. 顯示表格 (use_container_width=True 同時隱藏預設的索引欄)
+            st.dataframe(
+                df.drop(columns=['create_date']), # 隱藏原始 create_date
+                use_container_width=True, 
+                hide_index=True # 關鍵參數：隱藏您紅框圈起來的那一欄索引
+            )
             
-            # 💡 瓶頸1：輸出 XLSX 檔
+            # 5. 下載報表
             st.download_button(
                 label="📥 下載 XLSX 報表",
-                data=to_excel(df),
+                data=to_excel(df.drop(columns=['create_date'])),
                 file_name=f"退貨紀錄_{datetime.now().strftime('%Y%m%d')}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+        else:
+            st.info("尚無歷史單據。")
             )
         else: st.info("尚無歷史單據。")
