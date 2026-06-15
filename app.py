@@ -6,29 +6,11 @@ from datetime import datetime
 
 st.set_page_config(page_title="物流退貨點收系統", layout="centered")
 
-# ==========================================
-# 🔒 隱藏官方圖標與選單 (完全無痕美化)
-# ==========================================
-st.markdown(
-    """
-    <style>
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    header {visibility: hidden;}
-    .stDeployButton {display:none !important;}
-    div[data-testid="stStatusWidget"] {display:none !important;}
-    footer {display:none !important;}
-    .block-container {padding-top: 2rem !important; padding-bottom: 0rem !important;}
-    </style>
-    """,
-    unsafe_html=True
-)
-
-# 💡 【核心設定】
-ORIGINAL_ADMIN = "Admin999" 
+# 💡 【最高管理者姓名設定】
+ORIGINAL_ADMIN = "余宸緯" 
 
 # ==========================================
-# 💡 雲端專用：防呆自動初始化資料庫
+# 💡 雲端專用：自動初始化資料庫
 # ==========================================
 def init_db_if_not_exists():
     conn = sqlite3.connect('return_system.db')
@@ -119,7 +101,7 @@ if not st.session_state['logged_in']:
             if reg_name and reg_pwd:
                 conn = get_db_connection()
                 try:
-                    initial_role = "管理者" if reg_name == ORIGINAL_ADMIN or reg_name == "余宸緯" else "一般用戶"
+                    initial_role = "管理者" if reg_name == ORIGINAL_ADMIN else "一般用戶"
                     conn.execute('INSERT INTO users (username, password, register_date, role) VALUES (?, ?, ?, ?)', 
                                  (reg_name, reg_pwd, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), initial_role))
                     conn.commit()
@@ -186,11 +168,11 @@ else:
             
             st.markdown("**🔍 商品條碼登錄**")
             
-            # 💡 【核心優化點】：改用內建大框框接收藍牙槍或手動輸入，並加上拍攝不良品的直接按鈕
-            barcode_input = st.text_input("請手動輸入條碼或直接使用藍牙槍掃描", key="barcode_field").strip()
+            # 使用官方最穩定的輸入框（全面支援藍牙掃描槍、手機手動輸入）
+            barcode_input = st.text_input("請點擊此處，直接用藍牙槍刷條碼（或手動輸入）", key="barcode_field").strip()
             
             if barcode_input:
-                st.success(f"📥 目前帶入條碼：**{barcode_input}**")
+                st.success(f"📥 目前已刷入條碼：**{barcode_input}**")
 
             st.markdown("---")
             ret_type = st.radio("選擇退貨形態", ["箱出", "散出"], horizontal=True)
@@ -208,7 +190,7 @@ else:
                     reason = st.selectbox("異常原因提示", [""] + reason_suggestions)
                     custom_reason = st.text_input("手動輸入異常原因")
                     if custom_reason: reason = custom_reason
-                    st.file_uploader("📸 拍攝或上傳不良品照片", type=["jpg", "png"])
+                    st.file_uploader("📸 拍攝或上傳不良品照片 (支援手機原生相機)", type=["jpg", "png"])
             
             col1, col2 = st.columns(2)
             with col1:
