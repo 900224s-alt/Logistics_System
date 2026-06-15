@@ -5,11 +5,13 @@ from datetime import datetime
 import io
 import streamlit.components.v1 as components
 
+# 設定頁面
 st.set_page_config(page_title="物流退貨點收系統", layout="wide")
 
-# 💡 設定
+# 管理者設定
 ORIGINAL_ADMIN = "余宸緯"
 
+# 初始化資料庫
 def init_db():
     conn = sqlite3.connect('return_system.db')
     cursor = conn.cursor()
@@ -25,13 +27,14 @@ def get_conn():
     conn.row_factory = sqlite3.Row
     return conn
 
+# XLSX 匯出工具
 def to_excel(df):
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         df.to_excel(writer, index=False)
     return output.getvalue()
 
-# 初始化狀態
+# Session 管理
 if 'logged_in' not in st.session_state: 
     st.session_state.update({'logged_in': False, 'username': "", 'is_admin': False, 'current_channel': "", 'current_batch_id': ""})
 
@@ -40,40 +43,35 @@ st.title("📦 物流退貨點收系統")
 if not st.session_state['logged_in']:
     tab1, tab2 = st.tabs(["👤 帳號登入", "📝 新人員註冊"])
     with tab1:
-        name = st.text_input("姓名", key="login_n")
-        pwd = st.text_input("密碼", type="password", key="login_p")
+        name = st.text_input("姓名", key="n1")
+        pwd = st.text_input("密碼", type="password", key="p1")
         if st.button("登入"):
             conn = get_conn()
             user = conn.execute('SELECT * FROM users WHERE username = ? AND password = ?', (name, pwd)).fetchone()
             if user:
-                # 登入成功後，確保 is_admin 判斷正確
                 is_admin = (user['role'] == "管理者" or name == ORIGINAL_ADMIN)
                 st.session_state.update({'logged_in': True, 'username': name, 'is_admin': is_admin})
                 conn.close(); st.rerun()
             conn.close()
     with tab2:
-        r_name = st.text_input("真實姓名", key="reg_n")
-        r_pwd = st.text_input("密碼", type="password", key="reg_p")
+        r_name = st.text_input("姓名", key="n2")
+        r_pwd = st.text_input("密碼", type="password", key="p2")
         if st.button("註冊"):
             conn = get_conn()
             try:
                 role = "管理者" if r_name == ORIGINAL_ADMIN else "一般用戶"
                 conn.execute('INSERT INTO users VALUES (?, ?, ?, ?)', (r_name, r_pwd, datetime.now().strftime("%Y-%m-%d"), role))
-                conn.commit(); st.success("註冊成功，請切換至登入頁")
+                conn.commit(); st.success("註冊成功")
             except: st.error("帳號已存在")
             conn.close()
 else:
-    st.sidebar.write(f"👤 {st.session_state['username']} ｜ {'👑 管理者' if st.session_state['is_admin'] else '一般成員'}")
+    st.sidebar.write(f"👤 {st.session_state['username']} ({'👑 管理者' if st.session_state['is_admin'] else '一般'})")
     if st.sidebar.button("登出"): st.session_state.update({'logged_in': False}); st.rerun()
     
-    # 這裡明確定義 Tab 顯示邏輯
     tabs_names = ["📦 退貨點收", "🔍 歷史紀錄"]
-    if st.session_state['is_admin']:
-        tabs_names.append("🔔 管理區")
-        
+    if st.session_state['is_admin']: tabs_names.append("🔔 管理區")
     tabs = st.tabs(tabs_names)
     
-    # 分頁 0: 退貨點收
     with tabs[0]:
         if st.session_state['current_channel'] == "":
             chan = st.selectbox("選擇通路", ["請選擇...", "MOMO", "寶雅", "康是美", "屈臣氏"])
@@ -95,7 +93,6 @@ else:
                 conn.commit(); conn.close(); st.rerun()
             if st.button("結束作業"): st.session_state['current_channel'] = ""; st.rerun()
 
-    # 分頁 1: 歷史紀錄
     with tabs[1]:
         st.header("🔍 歷史紀錄")
         c1, c2, c3 = st.columns(3)
@@ -104,7 +101,8 @@ else:
         filter_o = c3.text_input("作業員搜尋")
         
         conn = get_conn()
-        df = pd.read_sql_query("SELECT b.create_date, i.* FROM return_items i LEFT JOIN return_batches b ON i.batch_id = b.batch_id", conn)
+        # 修正資料載入邏輯：將 LEFT JOIN 欄位明確定義，避免衝突
+        df = pd.read_sql_query("SELECT b.create_date, i.batch_id, i.item_seq, i.barcode, i.return_type, i.expiry_date, i.quantity, i.quality_status, i.damage_reason, i.operator FROM return_items i LEFT JOIN return_batches b ON i.batch_id = b.batch_id", conn)
         conn.close()
         
         if not df.empty:
@@ -115,14 +113,15 @@ else:
             if filter_b: df = df[df['barcode'].str.contains(filter_b)]
             if filter_o: df = df[df['operator'].str.contains(filter_o)]
             
-            cols = ['建檔日期'] + [c for c in df.columns if c != '建檔日期' and c != 'id']
-            df_display = df[cols]
+            cols = ['建檔日期'] + [c for c in df.columns if c != '建檔日期']
+            df = df[cols]
             
-            st.dataframe(df_display, use_container_width=True, hide_index=True)
-            st.download_button("📥 下載 XLSX", data=to_excel(df_display), file_name="report.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            st.dataframe(df, use_container_width=True, hide_index=True)
+            st.download_button("📥 下載 XLSX", data=to_excel(df), file_name="report.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        else:
+            st.info("暫無紀錄，請先進行點收作業。")
     
-    # 分頁 2: 管理區 (只有管理者會看到)
     if st.session_state['is_admin']:
         with tabs[2]:
             st.header("🔔 管理區")
-            st.write("目前具備管理者權限，可執行批核與維護作業。")
+            st.write("管理者權限驗證成功，具備維護與批核功能。")
