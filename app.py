@@ -134,7 +134,6 @@ else:
                 if selected_chan != "請選擇...":
                     st.session_state['current_channel'] = selected_chan
                     st.session_state['current_env'] = env_choice
-                    st.session_state['is_batch_saved'] = False 
                     today_str = datetime.now().strftime("%Y%m%d")
                     prefix = "TEST" if env_choice == "測試環境" else "Back"
                     conn = get_db_connection()
@@ -147,73 +146,51 @@ else:
             
             st.markdown("**📷 即時鏡頭掃碼登錄區**")
             
-            # 💡 【相機畫面加高＋紅線強制作業中心點修正】
+            # 💡 【終極覆蓋】：直接在內嵌 HTML 中鎖死高度與強制紅線絕對居中
             components.html(
                 """
+                <div id="scanner_container" style="position: relative; width: 100%; font-family: sans-serif;">
+                    
+                    <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 10px;">
+                        <input type="text" id="barcode_display" placeholder="手動、藍牙槍或等待鏡頭嗶聲" 
+                               style="flex: 1; padding: 12px; font-size: 16px; border: 1px solid #ccc; border-radius: 4px;">
+                        <button id="scan_btn" style="padding: 12px 20px; font-size: 16px; background-color: #ff4b4b; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">
+                            📷 啟動相機
+                        </button>
+                    </div>
+                    
+                    <div id="interactive" class="viewport" style="display: none; position: relative; width: 100%; height: 300px; border: 3px solid #ff4b4b; border-radius: 8px; overflow: hidden; background: #000;">
+                        <div style="position: absolute; top: 50% !important; left: 5% !important; width: 90% !important; height: 3px !important; background-color: #ff0000 !important; box-shadow: 0 0 10px #ff0000 !important; z-index: 99999 !important; pointer-events: none;"></div>
+                    </div>
+                    
+                    <button id="close_btn" style="display: none; margin-top: 10px; width: 100%; padding: 10px; background-color: #555; color: white; border: none; border-radius: 4px; font-size: 14px; font-weight: bold;">❌ 關閉相機</button>
+                </div>
+
                 <style>
-                    /* 讓相機視訊區塊高度拉大，畫面不再扁扁的 */
-                    #interactive {
-                        position: relative;
-                        width: 100%;
-                        height: 380px; /* 💡 從原本的自適應改為固定高大畫面 */
-                        border: 2px solid #333;
-                        border-radius: 8px;
-                        overflow: hidden;
-                        background: #000;
-                    }
                     #interactive video {
                         width: 100% !important;
                         height: 100% !important;
-                        object-fit: cover; /* 💡 確保影像填滿整個大框框 */
+                        object-fit: cover !important;
                     }
                     #interactive canvas {
                         display: none !important;
                     }
-                    /* 💡 終極絕對定位：強制將紅線定位在 #interactive 容器的正中央 */
-                    .center-laser {
-                        position: absolute;
-                        top: 50%;
-                        left: 5%;
-                        width: 90%;
-                        height: 3px;
-                        background-color: #ff0000;
-                        box-shadow: 0 0 10px #ff0000;
-                        z-index: 10000; /* 確保疊在視訊畫面的最上層 */
-                        pointer-events: none;
-                    }
                 </style>
-                
-                <div style="display: flex; gap: 8px; align-items: center; font-family: sans-serif; margin-bottom: 10px;">
-                    <input type="text" id="barcode_display" placeholder="手動輸入、藍牙槍或等待相機嗶聲" 
-                           style="flex: 1; padding: 12px; font-size: 16px; border: 1px solid #ccc; border-radius: 4px;">
-                    <button id="scan_btn" style="padding: 12px 20px; font-size: 16px; background-color: #ff4b4b; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">
-                        📷 啟動掃碼
-                    </button>
-                </div>
-                
-                <div id="camera_modal" style="display: none; position: fixed; top:0; left:0; width:100vw; height:100vh; background: rgba(0,0,0,0.95); z-index: 99999; flex-direction: column; justify-content: center; align-items: center;">
-                    <div style="position: relative; width: 92%; max-width: 400px;">
-                        <div id="interactive" class="viewport">
-                            <div class="center-laser"></div>
-                        </div>
-                    </div>
-                    <button id="close_cam" style="margin-top: 25px; padding: 12px 30px; background: #ff4b4b; color: white; border: none; border-radius: 4px; font-size: 16px; font-weight: bold; box-shadow: 0 4px 6px rgba(0,0,0,0.2);">❌ 關閉相機系統</button>
-                </div>
 
                 <script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script>
                 <script>
                     const barcodeDisplay = document.getElementById('barcode_display');
                     const scanBtn = document.getElementById('scan_btn');
-                    const cameraModal = document.getElementById('camera_modal');
-                    const closeCam = document.getElementById('close_cam');
+                    const cameraArea = document.getElementById('interactive');
+                    const closeBtn = document.getElementById('close_btn');
 
-                    // 當手動輸入時即時傳回 Streamlit
                     barcodeDisplay.addEventListener('input', (e) => {
                         window.parent.postMessage({type: 'streamlit:setComponentValue', value: e.target.value}, '*');
                     });
 
                     scanBtn.addEventListener('click', () => {
-                        cameraModal.style.display = 'flex';
+                        cameraArea.style.display = 'block';
+                        closeBtn.style.display = 'block';
                         Quagga.init({
                             inputStream : {
                                 name : "Live",
@@ -227,11 +204,7 @@ else:
                             },
                             decoder : { readers : ["code_128_reader", "ean_reader", "ean_8_reader", "code_39_reader"] }
                         }, function(err) {
-                            if (err) { 
-                                alert("鏡頭啟動失敗，請重新整理網頁並給予相機權限！"); 
-                                cameraModal.style.display = 'none'; 
-                                return; 
-                            }
+                            if (err) { alert("鏡頭開門失敗，請重整網頁！"); cameraArea.style.display = 'none'; closeBtn.style.display = 'none'; return; }
                             Quagga.start();
                         });
                     });
@@ -240,26 +213,24 @@ else:
                         if(data.codeResult && data.codeResult.code) {
                             let code = data.codeResult.code;
                             barcodeDisplay.value = code;
-                            // 將掃描到的條碼秒傳回 Streamlit 變數
                             window.parent.postMessage({type: 'streamlit:setComponentValue', value: code}, '*');
                             Quagga.stop();
-                            cameraModal.style.display = 'none';
+                            cameraArea.style.display = 'none';
+                            closeBtn.style.display = 'none';
                         }
                     });
 
-                    closeCam.addEventListener('click', () => {
+                    closeBtn.addEventListener('click', () => {
                         Quagga.stop();
-                        cameraModal.style.display = 'none';
+                        cameraArea.style.display = 'none';
+                        closeBtn.style.display = 'none';
                     });
                 </script>
                 """,
-                height=75,
+                height=380, # 💡 將整個大外框拉高，強迫 Streamlit 吐出超大版面
             )
             
-            # 接收 HTML 傳回來的條碼數據
             barcode_input = st.session_state.get('barcode_field', '').strip()
-            
-            # 最後確認框
             final_barcode = st.text_input("最終確認條碼（相機掃描後會自動填入此處）", value=barcode_input)
 
             st.markdown("---")
@@ -282,10 +253,8 @@ else:
                     elif ret_type == "散出" and not exp_date: st.error("❌ 散出必須填寫效期！")
                     else:
                         conn = get_db_connection()
-                        # 自動幫當前批次存檔防呆
                         today_str = datetime.now().strftime("%Y%m%d")
                         conn.execute("INSERT OR IGNORE INTO return_batches VALUES (?, ?, ?, '作業中')", (st.session_state['current_batch_id'], st.session_state['current_channel'], today_str))
-                        
                         seq = conn.execute("SELECT COUNT(*) FROM return_items WHERE batch_id = ?", (st.session_state['current_batch_id'],)).fetchone()[0] + 1
                         conn.execute('''INSERT INTO return_items (batch_id, item_seq, barcode, return_type, expiry_date, quantity, quality_status, damage_reason, operator)
                                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''', (st.session_state['current_batch_id'], seq, final_barcode, ret_type, exp_date, qty, quality, reason, st.session_state['username']))
