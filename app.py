@@ -7,7 +7,25 @@ import streamlit.components.v1 as components
 
 st.set_page_config(page_title="物流退貨點收系統", layout="centered")
 
-# 💡 【核心設定】請在這裡輸入您的真實中文姓名！
+# ==========================================
+# 🔒 隱藏官方圖標與選單 (完全無痕美化)
+# ==========================================
+st.markdown(
+    """
+    <style>
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    header {visibility: hidden;}
+    .stDeployButton {display:none !important;}
+    div[data-testid="stStatusWidget"] {display:none !important;}
+    footer {display:none !important;}
+    .block-container {padding-top: 2rem !important; padding-bottom: 0rem !important;}
+    </style>
+    """,
+    unsafe_html=True
+)
+
+# 💡 【核心設定】
 ORIGINAL_ADMIN = "Admin999" 
 
 # ==========================================
@@ -16,7 +34,6 @@ ORIGINAL_ADMIN = "Admin999"
 def init_db_if_not_exists():
     conn = sqlite3.connect('return_system.db')
     cursor = conn.cursor()
-    # 1. 建立使用者資料表
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (
             username TEXT PRIMARY KEY,
@@ -25,7 +42,6 @@ def init_db_if_not_exists():
             role TEXT DEFAULT '一般用戶'
         )
     ''')
-    # 2. 建立退貨批次主檔
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS return_batches (
             batch_id TEXT PRIMARY KEY,
@@ -34,7 +50,6 @@ def init_db_if_not_exists():
             status TEXT DEFAULT '作業中'
         )
     ''')
-    # 3. 建立退貨商品明細檔
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS return_items (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -55,7 +70,6 @@ def init_db_if_not_exists():
     conn.commit()
     conn.close()
 
-# 每次網頁載入時都執行檢查，確保雲端廚房絕對有蓋好
 init_db_if_not_exists()
 
 def get_db_connection():
@@ -172,6 +186,8 @@ else:
             st.info(f"🏬 通路：**{st.session_state['current_channel']}** ｜ 🧾 預計批號：**{st.session_state['current_batch_id']}**")
             
             st.markdown("**🔍 商品條碼登錄**")
+            
+            # 💡 【本次關鍵修正點】：在 components.html 中強行加上 allow="camera" 權限打破雲端封鎖！
             components.html(
                 """
                 <div style="display: flex; gap: 8px; align-items: center; font-family: sans-serif;">
@@ -213,7 +229,7 @@ else:
                             },
                             decoder : { readers : ["code_128_reader", "ean_reader", "ean_8_reader", "code_39_reader"] }
                         }, function(err) {
-                            if (err) { alert("相機啟動失敗！"); cameraModal.style.display = 'none'; return; }
+                            if (err) { alert("相機啟動失敗，請確認是否允許網頁取用相機！"); cameraModal.style.display = 'none'; return; }
                             Quagga.start();
                         });
                     });
