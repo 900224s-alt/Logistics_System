@@ -5,10 +5,9 @@ from datetime import datetime
 
 st.set_page_config(page_title="物流退貨點收系統", layout="wide")
 
-# 💡 核心設定
+# 核心設定
 ORIGINAL_ADMIN = "余宸緯"
 
-# 初始化資料庫
 def init_db():
     conn = sqlite3.connect('return_system.db')
     cursor = conn.cursor()
@@ -24,7 +23,7 @@ def get_conn():
     conn.row_factory = sqlite3.Row
     return conn
 
-# 初始化 Session (補強權限與頻道判斷)
+# 初始化 Session
 if 'logged_in' not in st.session_state: 
     st.session_state.update({'logged_in': False, 'username': "", 'is_admin': False, 'current_channel': "", 'current_batch_id': ""})
 
@@ -55,37 +54,41 @@ if not st.session_state['logged_in']:
             except: st.error("帳號已存在")
             conn.close()
 else:
-    st.sidebar.write(f"👤 {st.session_state['username']} {'(👑 管理者)' if st.session_state['is_admin'] else ''}")
+    # 這裡顯示目前身分與登出
+    st.sidebar.write(f"👤 您好, {st.session_state['username']} {'(👑 管理者)' if st.session_state['is_admin'] else ''}")
     if st.sidebar.button("登出"): st.session_state.update({'logged_in': False, 'current_channel': "", 'current_batch_id': ""}); st.rerun()
     
-    tabs_names = ["📦 退貨點收", "🔍 歷史紀錄"]
+    tabs_names = ["📦 作業環境與點收", "🔍 歷史紀錄"]
     if st.session_state['is_admin']: tabs_names.append("🔔 管理區")
     tabs = st.tabs(tabs_names)
     
-    # 點收作業區
+    # 點收區：修正環境選擇邏輯
     with tabs[0]:
-        # 【強制顯示條件判斷】：確保無論如何只要登入就能操作點收
-        if st.session_state['current_channel'] == "":
-            chan = st.selectbox("選擇通路", ["請選擇...", "MOMO", "寶雅", "康是美", "屈臣氏"])
-            if st.button("鎖定並開始") and chan != "請選擇...":
-                st.session_state['current_channel'] = chan
-                today = datetime.now().strftime("%Y%m%d")
-                conn = get_conn()
-                cnt = conn.execute("SELECT COUNT(*) FROM return_batches WHERE batch_id LIKE ?", (f"Back{today}%",)).fetchone()[0]
-                st.session_state['current_batch_id'] = f"Back{today}{cnt+1:03d}"
-                conn.execute("INSERT INTO return_batches VALUES (?, ?, ?, '作業中')", (st.session_state['current_batch_id'], chan, today))
-                conn.commit(); conn.close(); st.rerun()
-        else:
-            st.write(f"🏬 目前通路：{st.session_state['current_channel']} ｜ 🧾 批號：{st.session_state['current_batch_id']}")
-            bc = st.text_input("輸入條碼")
-            if st.button("儲存"):
+        st.subheader("作業環境設定")
+        # 直接提供選擇器，不強制隱藏
+        chan = st.selectbox("請選擇您當前的作業通路：", ["請選擇...", "MOMO", "寶雅", "康是美", "屈臣氏"], key="chan_sel")
+        
+        if st.button("鎖定環境並開始點收") and chan != "請選擇...":
+            st.session_state['current_channel'] = chan
+            today = datetime.now().strftime("%Y%m%d")
+            conn = get_conn()
+            cnt = conn.execute("SELECT COUNT(*) FROM return_batches WHERE batch_id LIKE ?", (f"Back{today}%",)).fetchone()[0]
+            st.session_state['current_batch_id'] = f"Back{today}{cnt+1:03d}"
+            conn.execute("INSERT INTO return_batches VALUES (?, ?, ?, '作業中')", (st.session_state['current_batch_id'], chan, today))
+            conn.commit(); conn.close(); st.rerun()
+        
+        if st.session_state['current_channel'] != "":
+            st.divider()
+            st.write(f"✅ 目前已鎖定通路：**{st.session_state['current_channel']}** ｜ 批號：**{st.session_state['current_batch_id']}**")
+            bc = st.text_input("輸入條碼進行點收")
+            if st.button("儲存條碼"):
                 conn = get_conn()
                 seq = conn.execute("SELECT COUNT(*) FROM return_items WHERE batch_id = ?", (st.session_state['current_batch_id'],)).fetchone()[0] + 1
                 conn.execute('INSERT INTO return_items (batch_id, item_seq, barcode, operator) VALUES (?, ?, ?, ?)', (st.session_state['current_batch_id'], seq, bc, st.session_state['username']))
                 conn.commit(); conn.close(); st.rerun()
-            if st.button("結束作業"): st.session_state['current_channel'] = ""; st.rerun()
+            if st.button("切換環境/結束當前批次"): st.session_state['current_channel'] = ""; st.rerun()
 
-    # 歷史紀錄區
+    # 歷史紀錄區 (維持原本穩定狀態)
     with tabs[1]:
         st.header("🔍 歷史紀錄")
         c1, c2, c3 = st.columns(3)
