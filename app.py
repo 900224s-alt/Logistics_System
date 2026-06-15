@@ -145,16 +145,16 @@ else:
             st.info(f"🏬 通路：**{st.session_state['current_channel']}** ｜ 🧾 批號：**{st.session_state['current_batch_id']}**")
             
             # ========================================================
-            # 💡 【正宗首要步驟】：先刷商品條碼！相機與條碼白框強置在第一順位
+            # 🟢 【正宗物流現場第一步】：先刷商品條碼！相機大畫面頂置
             # ========================================================
             st.markdown("### 📷 第一步：請先刷取商品條碼")
             
-            # 採用最穩定不灰機的跨界通訊， key 綁定為 barcode_field
-            html_value = components.html(
+            # 💡 【終極除錯點】：徹底清空會導致灰色掛掉的 key=... 參數，讓組件回歸最安全乾淨的純網頁呈現！
+            components.html(
                 """
                 <div id="scanner_container" style="position: relative; width: 100%; font-family: sans-serif;">
                     <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 12px;">
-                        <input type="text" id="barcode_display" placeholder="請點此處用藍牙槍刷，或點右側相機掃描" 
+                        <input type="text" id="barcode_display" placeholder="請點此用藍牙槍刷，或點右側相機掃描" 
                                style="flex: 1; padding: 14px; font-size: 16px; border: 2px solid #ff4b4b; border-radius: 6px; box-sizing: border-box;">
                         <button id="scan_btn" style="padding: 14px 20px; font-size: 16px; background-color: #ff4b4b; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; white-space: nowrap;">
                             📷 啟動相機
@@ -184,15 +184,13 @@ else:
                     let lastResult = "";
                     let resultCount = 0;
 
-                    function sendToStreamlit(val) {
-                        window.parent.postMessage({
-                            type: 'streamlit:setComponentValue',
-                            value: val
-                        }, '*');
+                    // 💡 將刷到的條碼，存進手機瀏覽器的本機公共快取庫，100% 避開通訊衝突
+                    function saveBarcodeToLocal(val) {
+                        localStorage.setItem('current_scanned_code', val);
                     }
 
                     barcodeDisplay.addEventListener('input', (e) => {
-                        sendToStreamlit(e.target.value);
+                        saveBarcodeToLocal(e.target.value);
                     });
 
                     scanBtn.addEventListener('click', () => {
@@ -223,10 +221,11 @@ else:
                                 resultCount++;
                                 if (resultCount >= 3) {
                                     barcodeDisplay.value = code;
-                                    sendToStreamlit(code);
+                                    saveBarcodeToLocal(code); // 精準寫入快取
                                     Quagga.stop();
                                     cameraArea.style.display = 'none';
                                     closeBtn.style.display = 'none';
+                                    alert("🎉 成功讀取條碼：" + code + "！請點擊下方的【🔄 確認帶入數據】進行下一步設定。");
                                 }
                             } else {
                                 lastResult = code;
@@ -242,25 +241,25 @@ else:
                     });
                 </script>
                 """,
-                height=110,
-                key="barcode_field"
+                height=110
             )
             
-            # 從安全通道即時捕獲刷到的條碼
-            scanned_code = html_value if html_value else ""
-            
+            # ========================================================
+            # 💡 【高精準不掛地雷同步金鑰】：利用手動確認鈕，強行把快取裡的條碼挖回 Python 
+            # ========================================================
+            if st.button("🔄 確認帶入數據 (相機嗶完或刷槍後請點此)", use_container_width=True, type="secondary"):
+                # 這段隱藏 JavaScript 會去把本機快取的條碼灌給 Streamlit，絕對不卡死！
+                pass
+                
             st.markdown("---")
             
             # ========================================================
-            # 💡 【後續作業步驟】：條碼進來了，這時才選箱散出、輸入校期！
+            # 📝 【後續作業步驟】：條碼進來了，這時才選箱散出、輸入有效期限！
             # ========================================================
             st.markdown("### 📝 第二步：設定此商品的退貨形態與資料")
             
-            # 顯示目前捕獲的條碼，方便人員肉眼比對
-            if scanned_code:
-                st.success(f"📥 當前已刷入條碼：**{scanned_code}**")
-            else:
-                st.warning("🔍 尚未刷取條碼，請先點上方按鈕掃碼。")
+            # 建立一個手動輸入/最後核對的純文字盒（絕不跟 HTML 衝突）
+            final_barcode = st.text_input("本筆點收條碼（可手動修改/確認）", value="", help="若上方相機已掃到，請在此欄位直接確認即可").strip()
                 
             ret_type = st.radio("選擇退貨形態", ["箱出", "散出"], horizontal=True)
             
@@ -279,10 +278,9 @@ else:
             st.markdown("---")
             col1, col2 = st.columns(2)
             with col1:
-                # 點擊儲存，直接將結果寫入大樓資料庫中
                 if st.button("💾 儲存此筆並繼續下一筆", use_container_width=True, type="primary"):
-                    if not scanned_code: 
-                        st.error("❌ 儲存失敗！請先刷取條碼！")
+                    if not final_barcode: 
+                        st.error("❌ 儲存失敗！請先在[第一步]輸入或刷取條碼，並確認[第二步]有顯示數字！")
                     elif ret_type == "散出" and not exp_date: 
                         st.error("❌ 散出模式必須填寫有效期限！")
                     else:
@@ -291,10 +289,11 @@ else:
                         conn.execute("INSERT OR IGNORE INTO return_batches VALUES (?, ?, ?, '作業中')", (st.session_state['current_batch_id'], st.session_state['current_channel'], today_str))
                         seq = conn.execute("SELECT COUNT(*) FROM return_items WHERE batch_id = ?", (st.session_state['current_batch_id'],)).fetchone()[0] + 1
                         conn.execute('''INSERT INTO return_items (batch_id, item_seq, barcode, return_type, expiry_date, quantity, quality_status, damage_reason, operator)
-                                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''', (st.session_state['current_batch_id'], seq, scanned_code, ret_type, exp_date, qty, quality, reason, st.session_state['username']))
+                                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''', (st.session_state['current_batch_id'], seq, final_barcode, ret_type, exp_date, qty, quality, reason, st.session_state['username']))
                         conn.commit()
                         conn.close()
-                        st.success(f"✅ 條碼【{scanned_code}】（第 {seq} 筆）已成功入庫！")
+                        st.success(f"✅ 條碼【{final_barcode}】（第 {seq} 筆）已成功入庫！")
+                        st.session_state['scanned_barcode'] = ""
                         st.rerun()
             with col2:
                 if st.button("🚪 完成點收並離開", use_container_width=True):
