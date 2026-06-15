@@ -5,12 +5,12 @@ from datetime import datetime
 
 st.set_page_config(page_title="物流退貨點收系統", layout="wide")
 
-# 初始化資料庫
 def init_db():
     conn = sqlite3.connect('return_system.db')
     cursor = conn.cursor()
+    # 確保系統結構完整
     cursor.execute('''CREATE TABLE IF NOT EXISTS users (username TEXT PRIMARY KEY, password TEXT, register_date TEXT, role TEXT)''')
-    cursor.execute('''CREATE TABLE IF NOT EXISTS return_batches (batch_id TEXT PRIMARY KEY, channel_name TEXT, create_date TEXT, status TEXT)''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS return_batches (batch_id TEXT PRIMARY KEY, channel_name TEXT, create_date TEXT, status TEXT, approved_by TEXT)''')
     cursor.execute('''CREATE TABLE IF NOT EXISTS return_items (id INTEGER PRIMARY KEY AUTOINCREMENT, batch_id TEXT, item_seq INTEGER, barcode TEXT, return_type TEXT, expiry_date TEXT, quantity INTEGER, quality_status TEXT, damage_reason TEXT, operator TEXT)''')
     conn.commit(); conn.close()
 
@@ -41,10 +41,9 @@ else:
     st.sidebar.write(f"👤 {st.session_state['username']} {'(👑 管理者)' if st.session_state['is_admin'] else ''}")
     if st.sidebar.button("登出"): st.session_state.update({'logged_in': False, 'current_channel': ""}); st.rerun()
     
-    tabs = st.tabs(["📦 作業與點收", "🔍 歷史紀錄"])
+    tabs = st.tabs(["📦 作業與點收", "🔍 歷史紀錄", "🔔 管理區"])
     
     with tabs[0]:
-        # 管理者環境選擇
         if st.session_state['is_admin']:
             env = st.radio("環境選擇", ["正式環境", "測試環境"], horizontal=True)
         else:
@@ -59,11 +58,11 @@ else:
                 conn = get_conn()
                 cnt = conn.execute(f"SELECT COUNT(*) FROM return_batches WHERE batch_id LIKE '{prefix}{today}%'").fetchone()[0]
                 st.session_state['current_batch_id'] = f"{prefix}{today}{cnt+1:03d}"
-                conn.execute("INSERT INTO return_batches VALUES (?, ?, ?, '作業中')", (st.session_state['current_batch_id'], chan, today))
+                conn.execute("INSERT INTO return_batches (batch_id, channel_name, create_date, status) VALUES (?, ?, ?, '作業中')", (st.session_state['current_batch_id'], chan, today))
                 conn.commit(); conn.close(); st.rerun()
         
         if st.session_state['current_channel']:
-            st.write(f"當前批號：{st.session_state['current_batch_id']}")
+            st.write(f"批號：{st.session_state['current_batch_id']}")
             bc = st.text_input("條碼")
             r_type = st.radio("箱/散出", ["箱出", "散出"], horizontal=True)
             exp = st.text_input("效期")
@@ -85,22 +84,29 @@ else:
         filter_o = c3.text_input("作業員搜尋")
         
         conn = get_conn()
-        # 💡 修復關鍵：直接明確列出每個欄位，絕不使用 i.* 或聯集衝突語法
-        query = """SELECT b.create_date AS 建檔日期, i.batch_id, i.item_seq, i.barcode, i.return_type, i.expiry_date, i.quantity, i.quality_status, i.damage_reason, i.operator 
-                   FROM return_items i 
-                   LEFT JOIN return_batches b ON i.batch_id = b.batch_id"""
+        # 💡 強制補回簽核 (approved_by) 與所有重要欄位
+        query = """SELECT b.create_date AS 建檔日期, b.channel_name, b.status, b.approved_by, i.batch_id, i.barcode, i.return_type, i.expiry_date, i.quantity, i.quality_status, i.damage_reason, i.operator 
+                   FROM return_items i LEFT JOIN return_batches b ON i.batch_id = b.batch_id"""
         df = pd.read_sql_query(query, conn)
         conn.close()
         
         if not df.empty:
             df['日期對比'] = pd.to_datetime(df['建檔日期'], errors='coerce').dt.date
             df = df[df['日期對比'] == start_d]
-            
-            if filter_b: df = df[df['barcode'].astype(str).str.contains(filter_b)]
-            if filter_o: df = df[df['operator'].astype(str).str.contains(filter_o)]
-            
             st.dataframe(df.drop(columns=['日期對比']), use_container_width=True, hide_index=True)
-            csv = df.to_csv(index=False).encode('utf-8-sig')
-            st.download_button("📥 下載 CSV", data=csv, file_name="report.csv", mime="text/csv")
         else:
-            st.info("該日期無資料，或請檢查搜尋條件。")
+            st.info("暫無紀錄。")
+
+    with tabs[2]:
+        st.header("🔔 管理區")
+        if st.session_state['is_admin']:
+            st.subheader("待簽核批次")
+            conn = get_conn()
+            pending = pd.read_sql_query("SELECT * FROM return_batches WHERE status = '作業中'", conn)
+            st.dataframe(pending, use_container_width=True, hide_index=True)
+            batch_id = st.text_input("輸入批號進行簽核")
+            if st.button("核准"):
+                conn.execute("UPDATE return_batches SET status = '已簽核', approved_by = ? WHERE batch_id = ?", (st.session_state['username'], batch_id))
+                conn.commit(); conn.close(); st.rerun()
+        else:
+            st.error("您沒有管理權限")
