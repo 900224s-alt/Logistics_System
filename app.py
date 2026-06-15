@@ -67,7 +67,7 @@ if 'current_env' not in st.session_state: st.session_state['current_env'] = "正
 st.title("📦 物流退貨點收系統")
 
 # ==========================================
-# 登入與註冊頁面
+# 登入與註冊頁面 (維持原樣)
 # ==========================================
 if not st.session_state['logged_in']:
     tab1, tab2 = st.tabs(["👤 帳號登入", "📝 新人員註冊"])
@@ -108,7 +108,7 @@ if not st.session_state['logged_in']:
             else: st.warning("⚠️ 欄位不能留空。")
 
 # ==========================================
-# 系統主頁面 (登入成功)
+# 系統主頁面
 # ==========================================
 else:
     st.sidebar.write(f"👤 作業員：**{st.session_state['username']}**")
@@ -144,9 +144,9 @@ else:
         else:
             st.info(f"🏬 通路：**{st.session_state['current_channel']}** ｜ 🧾 批號：**{st.session_state['current_batch_id']}**")
             
-            st.markdown("**📷 即時鏡頭掃碼登錄區**")
+            st.markdown("**📷 高精準鏡頭辨識區**")
             
-            # 💡 【終極覆蓋】：直接在內嵌 HTML 中鎖死高度與強制紅線絕對居中
+            # 💡 【高精準度防卡控 HTML 重灌】
             components.html(
                 """
                 <div id="scanner_container" style="position: relative; width: 100%; font-family: sans-serif;">
@@ -160,10 +160,13 @@ else:
                     </div>
                     
                     <div id="interactive" class="viewport" style="display: none; position: relative; width: 100%; height: 300px; border: 3px solid #ff4b4b; border-radius: 8px; overflow: hidden; background: #000;">
-                        <div style="position: absolute; top: 50% !important; left: 5% !important; width: 90% !important; height: 3px !important; background-color: #ff0000 !important; box-shadow: 0 0 10px #ff0000 !important; z-index: 99999 !important; pointer-events: none;"></div>
+                        
+                        <div style="position: absolute; top: 35%; left: 10%; width: 80%; height: 30%; border: 2px dashed #ffeb3b; background: rgba(255, 235, 59, 0.1); border-radius: 4px; box-sizing: border-box; z-index: 99999; pointer-events: none;"></div>
+                        
+                        <div style="position: absolute; top: 50% !important; left: 12% !important; width: 76% !important; height: 3px !important; background-color: #ff0000 !important; box-shadow: 0 0 10px #ff0000 !important; z-index: 100000 !important; pointer-events: none;"></div>
                     </div>
                     
-                    <button id="close_btn" style="display: none; margin-top: 10px; width: 100%; padding: 10px; background-color: #555; color: white; border: none; border-radius: 4px; font-size: 14px; font-weight: bold;">❌ 關閉相機</button>
+                    <button id="close_btn" style="display: none; margin-top: 10px; width: 100%; padding: 10px; background-color: #555; color: white; border: none; border-radius: 4px; font-size: 14px; font-weight: bold;">❌ 關閉相機系統</button>
                 </div>
 
                 <style>
@@ -184,6 +187,10 @@ else:
                     const cameraArea = document.getElementById('interactive');
                     const closeBtn = document.getElementById('close_btn');
 
+                    // 機制二變數：比對快取存儲器
+                    let lastResult = "";
+                    let resultCount = 0;
+
                     barcodeDisplay.addEventListener('input', (e) => {
                         window.parent.postMessage({type: 'streamlit:setComponentValue', value: e.target.value}, '*');
                     });
@@ -191,6 +198,11 @@ else:
                     scanBtn.addEventListener('click', () => {
                         cameraArea.style.display = 'block';
                         closeBtn.style.display = 'block';
+                        
+                        // 初始化清空緩存
+                        lastResult = "";
+                        resultCount = 0;
+
                         Quagga.init({
                             inputStream : {
                                 name : "Live",
@@ -202,9 +214,14 @@ else:
                                     facingMode: "environment"
                                 }
                             },
+                            // 💡 控卡控點 1：限制辨識區域 (Area) 只鎖定在中段 30% 高度區間，排除框外的雜訊
+                            locate: true,
+                            patchSize: "medium",
+                            halfSample: true,
+                            frequency: 4, // 💡 卡控點 2：調降抽樣頻率 (一秒只拍4次，防晃動瞎猜)
                             decoder : { readers : ["code_128_reader", "ean_reader", "ean_8_reader", "code_39_reader"] }
                         }, function(err) {
-                            if (err) { alert("鏡頭開門失敗，請重整網頁！"); cameraArea.style.display = 'none'; closeBtn.style.display = 'none'; return; }
+                            if (err) { alert("鏡頭開門失敗！"); return; }
                             Quagga.start();
                         });
                     });
@@ -212,11 +229,23 @@ else:
                     Quagga.onDetected(function(data) {
                         if(data.codeResult && data.codeResult.code) {
                             let code = data.codeResult.code;
-                            barcodeDisplay.value = code;
-                            window.parent.postMessage({type: 'streamlit:setComponentValue', value: code}, '*');
-                            Quagga.stop();
-                            cameraArea.style.display = 'none';
-                            closeBtn.style.display = 'none';
+                            
+                            // 💡 卡控點 3：連續驗證比對演算法
+                            if (code === lastResult) {
+                                resultCount++;
+                                // 必須連續 3 次抓到一模一樣的字串，才正式核准寫入系統
+                                if (resultCount >= 3) {
+                                    barcodeDisplay.value = code;
+                                    window.parent.postMessage({type: 'streamlit:setComponentValue', value: code}, '*');
+                                    Quagga.stop();
+                                    cameraArea.style.display = 'none';
+                                    closeBtn.style.display = 'none';
+                                }
+                            } else {
+                                // 只要有一次數字不同，立刻重來，嚴格把關
+                                lastResult = code;
+                                resultCount = 1;
+                            }
                         }
                     });
 
@@ -227,11 +256,11 @@ else:
                     });
                 </script>
                 """,
-                height=380, # 💡 將整個大外框拉高，強迫 Streamlit 吐出超大版面
+                height=380,
             )
             
             barcode_input = st.session_state.get('barcode_field', '').strip()
-            final_barcode = st.text_input("最終確認條碼（相機掃描後會自動填入此處）", value=barcode_input)
+            final_barcode = st.text_input("最終確認條碼（相機成功鎖定後會自動帶入）", value=barcode_input)
 
             st.markdown("---")
             ret_type = st.radio("選擇退貨形態", ["箱出", "散出"], horizontal=True)
