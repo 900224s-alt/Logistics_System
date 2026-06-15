@@ -2,11 +2,10 @@ import streamlit as st
 import sqlite3
 import pandas as pd
 from datetime import datetime
-import io
 
 st.set_page_config(page_title="物流退貨點收系統", layout="wide")
 
-# 管理者設定
+# 💡 核心設定
 ORIGINAL_ADMIN = "余宸緯"
 
 def init_db():
@@ -24,12 +23,7 @@ def get_conn():
     conn.row_factory = sqlite3.Row
     return conn
 
-def to_excel(df):
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        df.to_excel(writer, index=False)
-    return output.getvalue()
-
+# 狀態管理
 if 'logged_in' not in st.session_state: 
     st.session_state.update({'logged_in': False, 'username': "", 'is_admin': False, 'current_channel': "", 'current_batch_id': ""})
 
@@ -60,7 +54,7 @@ if not st.session_state['logged_in']:
             except: st.error("帳號已存在")
             conn.close()
 else:
-    st.sidebar.write(f"👤 {st.session_state['username']} ({'👑 管理者' if st.session_state['is_admin'] else '一般'})")
+    st.sidebar.write(f"👤 {st.session_state['username']} {'(👑 管理者)' if st.session_state['is_admin'] else ''}")
     if st.sidebar.button("登出"): st.session_state.update({'logged_in': False}); st.rerun()
     
     tabs_names = ["📦 退貨點收", "🔍 歷史紀錄"]
@@ -96,33 +90,30 @@ else:
         filter_o = c3.text_input("作業員搜尋")
         
         conn = get_conn()
-        # 修正：精確指定欄位，不使用 select *，這能避免重複鍵報錯
-        query = """SELECT b.create_date as raw_date, i.batch_id, i.item_seq, i.barcode, i.return_type, i.expiry_date, i.quantity, i.quality_status, i.damage_reason, i.operator 
+        query = """SELECT b.create_date, i.batch_id, i.item_seq, i.barcode, i.return_type, i.expiry_date, i.quantity, i.quality_status, i.damage_reason, i.operator 
                    FROM return_items i LEFT JOIN return_batches b ON i.batch_id = b.batch_id"""
         df = pd.read_sql_query(query, conn)
         conn.close()
         
         if not df.empty:
-            # 修正：日期轉換邏輯
-            df['建檔日期'] = df['raw_date'].astype(str).str.replace('-', '').str[:8]
-            df['建檔日期'] = df['建檔日期'].apply(lambda x: f"{x[:4]}/{x[4:6]}/{x[6:]}" if len(x)==8 else x)
+            df.rename(columns={'create_date': '建檔日期'}, inplace=True)
+            df['建檔日期'] = df['建檔日期'].astype(str).str[:8]
             df['barcode'] = df['barcode'].astype(str).apply(lambda x: f"'{x}")
             
             if filter_b: df = df[df['barcode'].str.contains(filter_b)]
             if filter_o: df = df[df['operator'].str.contains(filter_o)]
             
-            # 整理顯示欄位，排除 raw_date
-            df_display = df.drop(columns=['raw_date'])
-            cols = ['建檔日期'] + [c for c in df_display.columns if c != '建檔日期']
-            df_display = df_display[cols]
+            cols = ['建檔日期'] + [c for c in df.columns if c != '建檔日期']
+            df = df[cols]
             
-            # 隱藏索引
-            st.dataframe(df_display, use_container_width=True, hide_index=True)
-            st.download_button("📥 下載 XLSX", data=to_excel(df_display), file_name="report.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            st.dataframe(df, use_container_width=True, hide_index=True)
+            
+            csv = df.to_csv(index=False).encode('utf-8-sig')
+            st.download_button("📥 下載 CSV 報表", data=csv, file_name="report.csv", mime="text/csv")
         else:
-            st.info("暫無紀錄，請先進行點收作業。")
+            st.info("暫無紀錄。")
     
     if st.session_state['is_admin']:
         with tabs[2]:
             st.header("🔔 管理區")
-            st.write("管理者權限已驗證。")
+            st.write("管理者權限驗證成功，具備維護與批核功能。")
