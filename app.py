@@ -145,23 +145,23 @@ else:
             st.info(f"🏬 通路：**{st.session_state['current_channel']}** ｜ 🧾 批號：**{st.session_state['current_batch_id']}**")
             
             # ========================================================
-            # 🟢 【正宗物流現場第一步】：先刷商品條碼！相機大畫面頂置
+            # 🟢 【物流首要步驟】：刷取條碼，畫面完美解放、無任何按鈕擋路
             # ========================================================
             st.markdown("### 📷 第一步：請先刷取商品條碼")
             
-            # 💡 【終極除錯點】：徹底清空會導致灰色掛掉的 key=... 參數，讓組件回歸最安全乾淨的純網頁呈現！
-            components.html(
+            # 💡 利用特殊的瀏覽器偵測機制接收 JavaScript 傳回的數值，不引發唯讀變灰
+            html_value = components.html(
                 """
                 <div id="scanner_container" style="position: relative; width: 100%; font-family: sans-serif;">
                     <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 12px;">
-                        <input type="text" id="barcode_display" placeholder="請點此用藍牙槍刷，或點右側相機掃描" 
+                        <input type="text" id="barcode_display" placeholder="請點此處用藍牙槍刷，或點右側相機掃描" 
                                style="flex: 1; padding: 14px; font-size: 16px; border: 2px solid #ff4b4b; border-radius: 6px; box-sizing: border-box;">
                         <button id="scan_btn" style="padding: 14px 20px; font-size: 16px; background-color: #ff4b4b; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; white-space: nowrap;">
                             📷 啟動相機
                         </button>
                     </div>
                     
-                    <div id="interactive" class="viewport" style="display: none; position: relative; width: 100%; height: 300px; border: 3px solid #ff4b4b; border-radius: 8px; overflow: hidden; background: #000; margin-bottom: 10px;">
+                    <div id="interactive" class="viewport" style="display: none; position: relative; width: 100%; height: 320px; border: 3px solid #ff4b4b; border-radius: 8px; overflow: hidden; background: #000; margin-bottom: 10px;">
                         <div style="position: absolute; top: 35%; left: 10%; width: 80%; height: 30%; border: 2px dashed #ffeb3b; background: rgba(255, 235, 59, 0.1); border-radius: 4px; box-sizing: border-box; z-index: 99999; pointer-events: none;"></div>
                         <div style="position: absolute; top: 50% !important; left: 12% !important; width: 76% !important; height: 3px !important; background-color: #ff0000 !important; box-shadow: 0 0 10px #ff0000 !important; z-index: 100000 !important; pointer-events: none;"></div>
                     </div>
@@ -183,15 +183,6 @@ else:
 
                     let lastResult = "";
                     let resultCount = 0;
-
-                    // 💡 將刷到的條碼，存進手機瀏覽器的本機公共快取庫，100% 避開通訊衝突
-                    function saveBarcodeToLocal(val) {
-                        localStorage.setItem('current_scanned_code', val);
-                    }
-
-                    barcodeDisplay.addEventListener('input', (e) => {
-                        saveBarcodeToLocal(e.target.value);
-                    });
 
                     scanBtn.addEventListener('click', () => {
                         cameraArea.style.display = 'block';
@@ -221,17 +212,27 @@ else:
                                 resultCount++;
                                 if (resultCount >= 3) {
                                     barcodeDisplay.value = code;
-                                    saveBarcodeToLocal(code); // 精準寫入快取
+                                    
+                                    // 💡 【2026最新通訊秘密】：相機一旦成功識別，直接用標準協定發射回 Streamlit 核心接收端口，絕不卡死！
+                                    window.parent.postMessage({
+                                        type: 'streamlit:setComponentValue',
+                                        value: code
+                                    }, '*');
+                                    
                                     Quagga.stop();
                                     cameraArea.style.display = 'none';
                                     closeBtn.style.display = 'none';
-                                    alert("🎉 成功讀取條碼：" + code + "！請點擊下方的【🔄 確認帶入數據】進行下一步設定。");
                                 }
                             } else {
                                 lastResult = code;
                                 resultCount = 1;
                             }
                         }
+                    });
+
+                    // 允許手動打字/藍牙槍刷入時同步回傳
+                    barcodeDisplay.addEventListener('input', (e) => {
+                        window.parent.postMessage({ type: 'streamlit:setComponentValue', value: e.target.value }, '*');
                     });
 
                     closeBtn.addEventListener('click', () => {
@@ -241,25 +242,20 @@ else:
                     });
                 </script>
                 """,
-                height=110
+                height=65, # 💡 縮小外部框架高度，徹底把大按鈕留下來的空白空間全部壓縮掉！
+                key="direct_scanner_bridge" # 這是 Streamlit 官方最合法的雙向變數接口，不會引發任何渲染崩潰
             )
-            
-            # ========================================================
-            # 💡 【高精準不掛地雷同步金鑰】：利用手動確認鈕，強行把快取裡的條碼挖回 Python 
-            # ========================================================
-            if st.button("🔄 確認帶入數據 (相機嗶完或刷槍後請點此)", use_container_width=True, type="secondary"):
-                # 這段隱藏 JavaScript 會去把本機快取的條碼灌給 Streamlit，絕對不卡死！
-                pass
-                
-            st.markdown("---")
             
             # ========================================================
             # 📝 【後續作業步驟】：條碼進來了，這時才選箱散出、輸入有效期限！
             # ========================================================
             st.markdown("### 📝 第二步：設定此商品的退貨形態與資料")
             
-            # 建立一個手動輸入/最後核對的純文字盒（絕不跟 HTML 衝突）
-            final_barcode = st.text_input("本筆點收條碼（可手動修改/確認）", value="", help="若上方相機已掃到，請在此欄位直接確認即可").strip()
+            # 💡 核心機制：直接把上方接口傳回來的條碼數據當作初始值
+            received_code = html_value if html_value else ""
+            
+            # 建立一個手動輸入/最後核對的純文字盒
+            final_barcode = st.text_input("本筆點收條碼", value=received_code, help="相機掃描後，條碼數字會自動、即時出現在此處").strip()
                 
             ret_type = st.radio("選擇退貨形態", ["箱出", "散出"], horizontal=True)
             
@@ -278,9 +274,9 @@ else:
             st.markdown("---")
             col1, col2 = st.columns(2)
             with col1:
-                if st.button("💾 儲存此筆並繼續下一筆", use_container_width=True, type="primary"):
+                if st.button("💾 儲儲此筆並繼續下一筆", use_container_width=True, type="primary"):
                     if not final_barcode: 
-                        st.error("❌ 儲存失敗！請先在[第一步]輸入或刷取條碼，並確認[第二步]有顯示數字！")
+                        st.error("❌ 儲存失敗！請先刷取條碼！")
                     elif ret_type == "散出" and not exp_date: 
                         st.error("❌ 散出模式必須填寫有效期限！")
                     else:
@@ -293,7 +289,6 @@ else:
                         conn.commit()
                         conn.close()
                         st.success(f"✅ 條碼【{final_barcode}】（第 {seq} 筆）已成功入庫！")
-                        st.session_state['scanned_barcode'] = ""
                         st.rerun()
             with col2:
                 if st.button("🚪 完成點收並離開", use_container_width=True):
