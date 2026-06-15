@@ -3,7 +3,6 @@ import streamlit as st
 import sqlite3
 import pandas as pd
 from datetime import datetime
-import streamlit.components.v1 as components
 
 st.set_page_config(page_title="物流退貨點收系統", layout="centered")
 
@@ -187,72 +186,9 @@ else:
             
             st.markdown("**🔍 商品條碼登錄**")
             
-            # 💡 【本次關鍵修正點】：在 components.html 中強行加上 allow="camera" 權限打破雲端封鎖！
-            components.html(
-                """
-                <div style="display: flex; gap: 8px; align-items: center; font-family: sans-serif;">
-                    <input type="text" id="barcode_display" placeholder="請手動輸入或使用藍牙槍掃描" 
-                           style="flex: 1; padding: 10px; font-size: 16px; border: 1px solid #ccc; border-radius: 4px;">
-                    <button id="scan_btn" style="padding: 10px 16px; font-size: 16px; background-color: #ff4b4b; color: white; border: none; border-radius: 4px; cursor: pointer; display: flex; align-items: center; gap: 4px;">
-                        📷 掃碼
-                    </button>
-                </div>
-                
-                <div id="camera_modal" style="display: none; position: fixed; top:0; left:0; width:100vw; height:100vh; background: rgba(0,0,0,0.9); z-index: 99999; flex-direction: column; justify-content: center; align-items: center;">
-                    <div style="position: relative; width: 85%; max-width: 360px;">
-                        <div id="interactive" class="viewport" style="width: 100%; border: 2px solid #fff; border-radius: 8px; overflow: hidden;"></div>
-                        <div style="position: absolute; top: 50%; left: 5%; width: 90%; height: 2px; background-color: red; box-shadow: 0 0 8px red; pointer-events: none;"></div>
-                    </div>
-                    <p style="color: white; margin-top: 15px; font-size: 14px;">請將紅色線對準商品條碼</p>
-                    <button id="close_cam" style="margin-top: 10px; padding: 8px 16px; background: #666; color: white; border: none; border-radius: 4px;">❌ 關閉相機</button>
-                </div>
-
-                <script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script>
-                <script>
-                    const barcodeDisplay = document.getElementById('barcode_display');
-                    const scanBtn = document.getElementById('scan_btn');
-                    const cameraModal = document.getElementById('camera_modal');
-                    const closeCam = document.getElementById('close_cam');
-
-                    barcodeDisplay.addEventListener('input', (e) => {
-                        window.parent.postMessage({type: 'streamlit:setComponentValue', value: e.target.value}, '*');
-                    });
-
-                    scanBtn.addEventListener('click', () => {
-                        cameraModal.style.display = 'flex';
-                        Quagga.init({
-                            inputStream : {
-                                name : "Live",
-                                type : "LiveStream",
-                                target: document.querySelector('#interactive'),
-                                constraints: { width: 480, height: 320, facingMode: "environment" }
-                            },
-                            decoder : { readers : ["code_128_reader", "ean_reader", "ean_8_reader", "code_39_reader"] }
-                        }, function(err) {
-                            if (err) { alert("相機啟動失敗，請確認是否允許網頁取用相機！"); cameraModal.style.display = 'none'; return; }
-                            Quagga.start();
-                        });
-                    });
-
-                    Quagga.onDetected(function(data) {
-                        if(data.codeResult && data.codeResult.code) {
-                            let code = data.codeResult.code;
-                            barcodeDisplay.value = code;
-                            window.parent.postMessage({type: 'streamlit:setComponentValue', value: code}, '*');
-                            Quagga.stop();
-                            cameraModal.style.display = 'none';
-                        }
-                    });
-
-                    closeCam.addEventListener('click', () => {
-                        Quagga.stop();
-                        cameraModal.style.display = 'none';
-                    });
-                </script>
-                """, height=65,
-            )
+            # 💡 【核心優化點】：改用內建大框框接收藍牙槍或手動輸入，並加上拍攝不良品的直接按鈕
+            barcode_input = st.text_input("請手動輸入條碼或直接使用藍牙槍掃描", key="barcode_field").strip()
             
-            barcode_input = st.session_state.get('barcode_field', '')
             if barcode_input:
                 st.success(f"📥 目前帶入條碼：**{barcode_input}**")
 
@@ -272,7 +208,7 @@ else:
                     reason = st.selectbox("異常原因提示", [""] + reason_suggestions)
                     custom_reason = st.text_input("手動輸入異常原因")
                     if custom_reason: reason = custom_reason
-                    st.file_uploader("📸 拍攝不良品照片", type=["jpg", "png"])
+                    st.file_uploader("📸 拍攝或上傳不良品照片", type=["jpg", "png"])
             
             col1, col2 = st.columns(2)
             with col1:
@@ -368,7 +304,7 @@ else:
                 with col_btn1:
                     if st.button("🟢 同意修改", use_container_width=True, type="primary"):
                         conn = get_db_connection()
-                        conn.execute("UPDATE return_items SET quantity = new_quantity, damage_reason = new_damage_reason, approval_status = '已確認' WHERE id = ?", (app_id,))
+                        conn.execute("UPDATE return_items SET quantity = new_quantity, damage_reason = new_damage_reason, approval_status = '合格' WHERE id = ?", (app_id,))
                         conn.commit(); conn.close()
                         st.success("已核准變更！"); st.rerun()
                 with col_btn2:
