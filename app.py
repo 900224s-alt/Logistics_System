@@ -63,7 +63,6 @@ if 'is_admin' not in st.session_state: st.session_state['is_admin'] = False
 if 'current_channel' not in st.session_state: st.session_state['current_channel'] = ""
 if 'current_batch_id' not in st.session_state: st.session_state['current_batch_id'] = ""
 if 'current_env' not in st.session_state: st.session_state['current_env'] = "正式環境"
-if 'is_batch_saved' not in st.session_state: st.session_state['is_batch_saved'] = False
 
 st.title("📦 物流退貨點收系統")
 
@@ -148,36 +147,57 @@ else:
             
             st.markdown("**📷 即時鏡頭掃碼登錄區**")
             
-            # 💡 【終極修正】：透過 CSS 將 Quagga 產生的錄影視訊強制與手機螢幕 100% 貼合，防閃退！
+            # 💡 【相機畫面加高＋紅線強制作業中心點修正】
             components.html(
                 """
                 <style>
-                    /* 強制鎖定相機元件尺寸，使其完美適應手機畫面 */
+                    /* 讓相機視訊區塊高度拉大，畫面不再扁扁的 */
+                    #interactive {
+                        position: relative;
+                        width: 100%;
+                        height: 380px; /* 💡 從原本的自適應改為固定高大畫面 */
+                        border: 2px solid #333;
+                        border-radius: 8px;
+                        overflow: hidden;
+                        background: #000;
+                    }
                     #interactive video {
                         width: 100% !important;
-                        height: auto !important;
-                        max-width: 100%;
-                        display: block;
+                        height: 100% !important;
+                        object-fit: cover; /* 💡 確保影像填滿整個大框框 */
                     }
                     #interactive canvas {
-                        display: none !important; /* 隱藏除錯用重疊圖層，減輕手機運算負擔 */
+                        display: none !important;
+                    }
+                    /* 💡 終極絕對定位：強制將紅線定位在 #interactive 容器的正中央 */
+                    .center-laser {
+                        position: absolute;
+                        top: 50%;
+                        left: 5%;
+                        width: 90%;
+                        height: 3px;
+                        background-color: #ff0000;
+                        box-shadow: 0 0 10px #ff0000;
+                        z-index: 10000; /* 確保疊在視訊畫面的最上層 */
+                        pointer-events: none;
                     }
                 </style>
                 
-                <div style="display: flex; gap: 8px; align-items: center; font-family: sans-serif;">
-                    <input type="text" id="barcode_display" placeholder="手動、藍牙槍或等待相機嗶聲" 
-                           style="flex: 1; padding: 10px; font-size: 16px; border: 1px solid #ccc; border-radius: 4px;">
-                    <button id="scan_btn" style="padding: 10px 16px; font-size: 16px; background-color: #ff4b4b; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">
+                <div style="display: flex; gap: 8px; align-items: center; font-family: sans-serif; margin-bottom: 10px;">
+                    <input type="text" id="barcode_display" placeholder="手動輸入、藍牙槍或等待相機嗶聲" 
+                           style="flex: 1; padding: 12px; font-size: 16px; border: 1px solid #ccc; border-radius: 4px;">
+                    <button id="scan_btn" style="padding: 12px 20px; font-size: 16px; background-color: #ff4b4b; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">
                         📷 啟動掃碼
                     </button>
                 </div>
                 
-                <div id="camera_modal" style="display: none; position: fixed; top:0; left:0; width:100vw; height:100vh; background: rgba(0,0,0,0.9); z-index: 99999; flex-direction: column; justify-content: center; align-items: center;">
-                    <div style="position: relative; width: 90%; max-width: 360px;">
-                        <div id="interactive" class="viewport" style="width: 100%; border: 2px solid #fff; border-radius: 8px; overflow: hidden; background: #000;"></div>
-                        <div style="position: absolute; top: 50%; left: 5%; width: 90%; height: 2px; background-color: red; box-shadow: 0 0 8px red; pointer-events: none;"></div>
+                <div id="camera_modal" style="display: none; position: fixed; top:0; left:0; width:100vw; height:100vh; background: rgba(0,0,0,0.95); z-index: 99999; flex-direction: column; justify-content: center; align-items: center;">
+                    <div style="position: relative; width: 92%; max-width: 400px;">
+                        <div id="interactive" class="viewport">
+                            <div class="center-laser"></div>
+                        </div>
                     </div>
-                    <button id="close_cam" style="margin-top: 20px; padding: 12px 24px; background: #555; color: white; border: none; border-radius: 4px; font-size: 16px; font-weight: bold;">❌ 關閉相機</button>
+                    <button id="close_cam" style="margin-top: 25px; padding: 12px 30px; background: #ff4b4b; color: white; border: none; border-radius: 4px; font-size: 16px; font-weight: bold; box-shadow: 0 4px 6px rgba(0,0,0,0.2);">❌ 關閉相機系統</button>
                 </div>
 
                 <script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script>
@@ -187,6 +207,7 @@ else:
                     const cameraModal = document.getElementById('camera_modal');
                     const closeCam = document.getElementById('close_cam');
 
+                    // 當手動輸入時即時傳回 Streamlit
                     barcodeDisplay.addEventListener('input', (e) => {
                         window.parent.postMessage({type: 'streamlit:setComponentValue', value: e.target.value}, '*');
                     });
@@ -199,16 +220,15 @@ else:
                                 type : "LiveStream",
                                 target: document.querySelector('#interactive'),
                                 constraints: {
-                                    // 💡 改用符合多數手機自適應的標準物流尺寸
-                                    width: { min: 320, max: 640 },
-                                    height: { min: 240, max: 480 },
+                                    width: { min: 640, ideal: 1280 },
+                                    height: { min: 480, ideal: 960 },
                                     facingMode: "environment"
                                 }
                             },
                             decoder : { readers : ["code_128_reader", "ean_reader", "ean_8_reader", "code_39_reader"] }
                         }, function(err) {
                             if (err) { 
-                                alert("相機啟動失敗，請重新整理並允許權限！"); 
+                                alert("鏡頭啟動失敗，請重新整理網頁並給予相機權限！"); 
                                 cameraModal.style.display = 'none'; 
                                 return; 
                             }
@@ -220,6 +240,7 @@ else:
                         if(data.codeResult && data.codeResult.code) {
                             let code = data.codeResult.code;
                             barcodeDisplay.value = code;
+                            // 將掃描到的條碼秒傳回 Streamlit 變數
                             window.parent.postMessage({type: 'streamlit:setComponentValue', value: code}, '*');
                             Quagga.stop();
                             cameraModal.style.display = 'none';
@@ -232,14 +253,14 @@ else:
                     });
                 </script>
                 """,
-                height=65,
+                height=75,
             )
             
-            # 接收 HTML 變數數值
+            # 接收 HTML 傳回來的條碼數據
             barcode_input = st.session_state.get('barcode_field', '').strip()
             
-            # 輔助的最後確認欄位
-            final_barcode = st.text_input("最終確認條碼（可在此手動修正或由上方相機帶入）", value=barcode_input)
+            # 最後確認框
+            final_barcode = st.text_input("最終確認條碼（相機掃描後會自動填入此處）", value=barcode_input)
 
             st.markdown("---")
             ret_type = st.radio("選擇退貨形態", ["箱出", "散出"], horizontal=True)
@@ -261,10 +282,10 @@ else:
                     elif ret_type == "散出" and not exp_date: st.error("❌ 散出必須填寫效期！")
                     else:
                         conn = get_db_connection()
-                        if not st.session_state['is_batch_saved']:
-                            today_str = datetime.now().strftime("%Y%m%d")
-                            conn.execute("INSERT OR IGNORE INTO return_batches VALUES (?, ?, ?, '作業中')", (st.session_state['current_batch_id'], st.session_state['current_channel'], today_str))
-                            st.session_state['is_batch_saved'] = True
+                        # 自動幫當前批次存檔防呆
+                        today_str = datetime.now().strftime("%Y%m%d")
+                        conn.execute("INSERT OR IGNORE INTO return_batches VALUES (?, ?, ?, '作業中')", (st.session_state['current_batch_id'], st.session_state['current_channel'], today_str))
+                        
                         seq = conn.execute("SELECT COUNT(*) FROM return_items WHERE batch_id = ?", (st.session_state['current_batch_id'],)).fetchone()[0] + 1
                         conn.execute('''INSERT INTO return_items (batch_id, item_seq, barcode, return_type, expiry_date, quantity, quality_status, damage_reason, operator)
                                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''', (st.session_state['current_batch_id'], seq, final_barcode, ret_type, exp_date, qty, quality, reason, st.session_state['username']))
@@ -272,7 +293,7 @@ else:
                         st.success(f"✅ 第 {seq} 筆商品成功儲存！"); st.rerun()
             with col2:
                 if st.button("🚪 完成點收並離開", use_container_width=True):
-                    if st.session_state['is_batch_saved']:
+                    if st.session_state['current_batch_id']:
                         conn = get_db_connection(); conn.execute("UPDATE return_batches SET status = '已完成' WHERE batch_id = ?", (st.session_state['current_batch_id'],)); conn.commit(); conn.close()
                     st.session_state['current_channel'] = ""; st.rerun()
 
