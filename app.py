@@ -144,14 +144,13 @@ else:
         else:
             st.info(f"🏬 通路：**{st.session_state['current_channel']}** ｜ 🧾 批號：**{st.session_state['current_batch_id']}**")
             
-            # 💡 檢查是否有從 HTML 房傳來的直接寫入指令
+            # 💡 檢查是否有從安全網址重載傳回來的入庫指令
             query_params = st.query_params
             if "save_barcode" in query_params:
                 b_code = query_params["save_barcode"]
                 r_type = query_params.get("ret_type", "箱出")
                 e_date = query_params.get("exp_date", "")
                 
-                # 執行寫入資料庫
                 conn = get_db_connection()
                 today_str = datetime.now().strftime("%Y%m%d")
                 conn.execute("INSERT OR IGNORE INTO return_batches VALUES (?, ?, ?, '作業中')", (st.session_state['current_batch_id'], st.session_state['current_channel'], today_str))
@@ -160,9 +159,8 @@ else:
                                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''', (st.session_state['current_batch_id'], seq, b_code, r_type, e_date, 1, "良品", "", st.session_state['username']))
                 conn.commit(); conn.close()
                 
-                # 寫入完畢後清除網址參數，防止重複觸發
                 st.query_params.clear()
-                st.success(f"🎉 條碼【{b_code}】已成功入庫！")
+                st.success(f"🎉 條碼【{b_code}】已成功儲存入庫（第 {seq} 筆）！")
                 st.rerun()
 
             st.markdown("### 📝 第一步：設定退貨形態與效期")
@@ -174,9 +172,9 @@ else:
             st.markdown("---")
             st.markdown("### 📷 第二步：刷取條碼並直接儲存")
 
-            # 💡 【把按鈕封印進 HTML】：完全移除與 Streamlit 的即時通訊，回歸最原始、最不可能掛掉的純網頁架構！
+            # 💡 【徹底解決語法衝突】：移除 Python f-string，改用純字串，完美相容 JavaScript 括號！
             components.html(
-                f"""
+                """
                 <div id="scanner_container" style="position: relative; width: 100%; font-family: sans-serif;">
                     
                     <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 12px;">
@@ -200,8 +198,8 @@ else:
                 </div>
 
                 <style>
-                    #interactive video {{ width: 100% !important; height: 100% !important; object-fit: cover !important; }}
-                    #interactive canvas {{ display: none !important; }}
+                    #interactive video { width: 100% !important; height: 100% !important; object-fit: cover !important; }
+                    #interactive canvas { display: none !important; }
                 </style>
 
                 <script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script>
@@ -215,70 +213,90 @@ else:
                     let lastResult = "";
                     let resultCount = 0;
 
-                    scanBtn.addEventListener('click', () => {{
+                    scanBtn.addEventListener('click', () => {
                         cameraArea.style.display = 'block';
                         closeBtn.style.display = 'block';
                         lastResult = "";
                         resultCount = 0;
 
                         Quagga.init({
-                            inputStream : {{
+                            inputStream : {
                                 name : "Live",
                                 type : "LiveStream",
                                 target: document.querySelector('#interactive'),
-                                constraints: {{ width: {{ min: 640, ideal: 1280 }}, height: {{ min: 480, ideal: 960 }}, facingMode: "environment" }}
-                            }},
+                                constraints: { width: { min: 640, ideal: 1280 }, height: { min: 480, ideal: 960 }, facingMode: "environment" }
+                            },
                             locate: true,
                             patchSize: "medium",
                             halfSample: true,
                             frequency: 4,
-                            decoder : {{ readers : ["code_128_reader", "ean_reader", "ean_8_reader", "code_39_reader"] }}
-                        }, function(err) {{
-                            if (err) {{ alert("鏡頭開門失敗！"); return; }}
+                            decoder : { readers : ["code_128_reader", "ean_reader", "ean_8_reader", "code_39_reader"] }
+                        }, function(err) {
+                            if (err) { alert("鏡頭開門失敗！"); return; }
                             Quagga.start();
-                        }});
-                    }});
+                        });
+                    });
 
-                    Quagga.onDetected(function(data) {{
-                        if(data.codeResult && data.codeResult.code) {{
+                    Quagga.onDetected(function(data) {
+                        if(data.codeResult && data.codeResult.code) {
                             let code = data.codeResult.code;
-                            if (code === lastResult) {{
+                            if (code === lastResult) {
                                 resultCount++;
-                                if (resultCount >= 3) {{
+                                if (resultCount >= 3) {
                                     barcodeDisplay.value = code;
                                     Quagga.stop();
                                     cameraArea.style.display = 'none';
                                     closeBtn.style.display = 'none';
-                                }}
-                            } else {{
+                                }
+                            } else {
                                 lastResult = code;
                                 resultCount = 1;
-                            }}
-                        }}
-                    }});
+                            }
+                        }
+                    });
 
-                    closeBtn.addEventListener('click', () => {{
+                    closeBtn.addEventListener('click', () => {
                         Quagga.stop();
                         cameraArea.style.display = 'none';
                         closeBtn.style.display = 'none';
-                    }});
+                    });
 
-                    // 按下儲存按鈕，直接利用網頁跳轉安全寫入資料庫，徹底繞過 Streamlit 機制
-                    htmlSaveBtn.addEventListener('click', () => {{
+                    // 💡 安全無損提取：利用瀏覽器原生 API 動態去挖外層 Streamlit 目前勾選的狀態值
+                    htmlSaveBtn.addEventListener('click', () => {
                         let val = barcodeDisplay.value.trim();
-                        if(!val) {{
+                        if(!val) {
                             alert("❌ 請先刷取條碼或手動輸入！");
                             return;
-                        }}
-                        if("{ret_type}" === "散出" && "{exp_date}" === "") {{
+                        }
+                        
+                        // 1. 挖取外層退貨形態的選擇結果
+                        let r_type = "箱出";
+                        const labels = window.parent.document.querySelectorAll('label');
+                        for (let i = 0; i < labels.length; i++) {
+                            if (labels[i].innerText.includes("散出") && labels[i].parentElement.querySelector('input').checked) {
+                                r_type = "散出";
+                            }
+                        }
+                        
+                        // 2. 挖取有效期限輸入框的結果
+                        let e_date = "";
+                        const inputs = window.parent.document.querySelectorAll('input[type="text"]');
+                        for (let i = 0; i < inputs.length; i++) {
+                            // 排除白框本身，抓取外層的效期輸入框
+                            if (inputs[i].id !== "barcode_display" && inputs[i].value !== "") {
+                                e_date = inputs[i].value;
+                            }
+                        }
+
+                        if(r_type === "散出" && e_date === "") {
                             alert("❌ 散出形態必須先在上方填寫有效期限！");
                             return;
-                        }}
+                        }
                         
-                        // 透過網址安全傳送，100% 復活不卡死
-                        let targetUrl = window.parent.location.origin + window.parent.location.pathname + "?save_barcode=" + encodeURIComponent(val) + "&ret_type=" + encodeURIComponent("{ret_type}") + "&exp_date=" + encodeURIComponent("{exp_date}");
+                        // 安全跳轉參數重載，實現 100% 入庫
+                        let targetUrl = window.parent.location.origin + window.parent.location.pathname + "?save_barcode=" + encodeURIComponent(val) + "&ret_type=" + encodeURIComponent(r_type) + "&exp_date=" + encodeURIComponent(e_date);
                         window.parent.location.href = targetUrl;
-                    }});
+                    });
                 </script>
                 """,
                 height=420
@@ -286,7 +304,7 @@ else:
 
             if st.button("🚪 完成點收並離開", use_container_width=True):
                 if st.session_state['current_batch_id']:
-                    conn = get_db_connection(); conn.execute("UPDATE return_batches SET status = '已完成' WHERE batch_id = ?", (st.session_state['current_batch_id'],)); conn.commit(); conn.close()
+                    conn = get_db_connection(); conn.execute("UPDATE return_batches SET status = '已完成' WHERE batch_id = ?", (st.session_state['current_batch_id'],')); conn.commit(); conn.close()
                 st.session_state['current_channel'] = ""; st.rerun()
 
     # --- 歷史紀錄分頁 ---
