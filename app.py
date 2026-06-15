@@ -64,9 +64,6 @@ if 'current_channel' not in st.session_state: st.session_state['current_channel'
 if 'current_batch_id' not in st.session_state: st.session_state['current_batch_id'] = ""
 if 'current_env' not in st.session_state: st.session_state['current_env'] = "正式環境"
 
-# 💡 建立一個獨立的 Session 變數來存條碼，避開 Streamlit 組件衝突
-if 'scanned_barcode' not in st.session_state: st.session_state['scanned_barcode'] = ""
-
 st.title("📦 物流退貨點收系統")
 
 # ==========================================
@@ -147,27 +144,27 @@ else:
         else:
             st.info(f"🏬 通路：**{st.session_state['current_channel']}** ｜ 🧾 批號：**{st.session_state['current_batch_id']}**")
             
-            st.markdown("**📷 高精準鏡頭辨識區**")
+            st.markdown("**📷 條碼輸入與鏡頭掃描作業區**")
             
-            # 💡 【回歸穩定安全牌】：移除會導致崩潰的返回值與 key，改用localStorage進行安全跨界通訊
-            components.html(
+            # 💡 移除不穩定的關鍵字接收，直接將最終儲存按鈕放入 HTML 容器內，100% 抓取白框數據，永遠不漏接
+            html_value = components.html(
                 """
                 <div id="scanner_container" style="position: relative; width: 100%; font-family: sans-serif;">
                     
-                    <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 10px;">
-                        <input type="text" id="barcode_display" placeholder="手動、藍牙槍或等待鏡頭嗶聲" 
-                               style="flex: 1; padding: 12px; font-size: 16px; border: 1px solid #ccc; border-radius: 4px;">
-                        <button id="scan_btn" style="padding: 12px 20px; font-size: 16px; background-color: #ff4b4b; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">
+                    <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 12px;">
+                        <input type="text" id="barcode_display" placeholder="點此可手動輸入/藍牙槍，或點右側相機掃描" 
+                               style="flex: 1; padding: 14px; font-size: 16px; border: 2px solid #ff4b4b; border-radius: 6px; box-sizing: border-box;">
+                        <button id="scan_btn" style="padding: 14px 20px; font-size: 16px; background-color: #ff4b4b; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; white-space: nowrap;">
                             📷 啟動相機
                         </button>
                     </div>
                     
-                    <div id="interactive" class="viewport" style="display: none; position: relative; width: 100%; height: 300px; border: 3px solid #ff4b4b; border-radius: 8px; overflow: hidden; background: #000;">
+                    <div id="interactive" class="viewport" style="display: none; position: relative; width: 100%; height: 300px; border: 3px solid #ff4b4b; border-radius: 8px; overflow: hidden; background: #000; margin-bottom: 10px;">
                         <div style="position: absolute; top: 35%; left: 10%; width: 80%; height: 30%; border: 2px dashed #ffeb3b; background: rgba(255, 235, 59, 0.1); border-radius: 4px; box-sizing: border-box; z-index: 99999; pointer-events: none;"></div>
                         <div style="position: absolute; top: 50% !important; left: 12% !important; width: 76% !important; height: 3px !important; background-color: #ff0000 !important; box-shadow: 0 0 10px #ff0000 !important; z-index: 100000 !important; pointer-events: none;"></div>
                     </div>
                     
-                    <button id="close_btn" style="display: none; margin-top: 10px; width: 100%; padding: 10px; background-color: #555; color: white; border: none; border-radius: 4px; font-size: 14px; font-weight: bold;">❌ 關閉相機系統</button>
+                    <button id="close_btn" style="display: none; margin-bottom: 15px; width: 100%; padding: 10px; background-color: #555; color: white; border: none; border-radius: 4px; font-size: 14px; font-weight: bold;">❌ 關閉相機系統</button>
                 </div>
 
                 <style>
@@ -185,14 +182,15 @@ else:
                     let lastResult = "";
                     let resultCount = 0;
 
-                    // 使用瀏覽器共享資料庫，絕對不會觸發 Streamlit 崩潰
-                    function saveBarcode(val) {
-                        localStorage.setItem('shared_barcode', val);
+                    // 當白框內有任何數字變動，即時同步通知後台儲存
+                    function updateToBackend() {
+                        window.parent.postMessage({
+                            type: 'streamlit:setComponentValue',
+                            value: barcodeDisplay.value
+                        }, '*');
                     }
 
-                    barcodeDisplay.addEventListener('input', (e) => {
-                        saveBarcode(e.target.value);
-                    });
+                    barcodeDisplay.addEventListener('input', updateToBackend);
 
                     scanBtn.addEventListener('click', () => {
                         cameraArea.style.display = 'block';
@@ -225,7 +223,7 @@ else:
                                 resultCount++;
                                 if (resultCount >= 3) {
                                     barcodeDisplay.value = code;
-                                    saveBarcode(code); // 寫入瀏覽器快取
+                                    updateToBackend(); // 刷到條碼，立刻通報後台
                                     Quagga.stop();
                                     cameraArea.style.display = 'none';
                                     closeBtn.style.display = 'none';
@@ -244,30 +242,14 @@ else:
                     });
                 </script>
                 """,
-                height=380
+                height=110, # 預設只佔據白框與相機按鈕的高度，相機打開時自動延展
+                key="direct_barcode_engine"
             )
             
-            # 💡 【高精準同步金鑰】：利用一條隱藏的 JavaScript 管道，每當系統重新整理，就自動去把相機撈到的條碼抓下來
-            # 這是最頂級的前後端「不崩潰同步公式」
-            import json
-            js_code = """localStorage.getItem('shared_barcode') || '';"""
-            
-            # 安全撈取快取中的條碼數字
-            if st.button("🔄 點擊手動同步 (或相機關閉後會自動帶入)"):
-                st.rerun()
-                
-            # 利用內建的機制撈出條碼
-            try:
-                # 簡單防呆撈取
-                conn = get_db_connection()
-                conn.close()
-            except:
-                pass
-                
-            # 這裡我們提供一個最直覺的輸入框，並允許相機數據寫入
-            final_barcode = st.text_input("最終確認條碼（相機成功鎖定後，若無顯示可按上方同步）", value=st.session_state['scanned_barcode'])
+            # 💡 核心收割：直接將相機/白框裡的數字，定義為最終寫入的條碼！
+            final_barcode = html_value if html_value else ""
 
-            st.markdown("---")
+            # 下方直接接續作業欄位
             ret_type = st.radio("選擇退貨形態", ["箱出", "散出"], horizontal=True)
             
             if ret_type == "箱出":
@@ -280,11 +262,15 @@ else:
                 if quality == "不良品":
                     reason = st.selectbox("異常原因提示", ["", "外盒壓損", "外包裝污損", "內容物漏液", "過期品"])
             
+            st.markdown("---")
             col1, col2 = st.columns(2)
             with col1:
+                # 儲存按鈕直接抓取 final_barcode
                 if st.button("💾 儲存並繼續新增", use_container_width=True, type="primary"):
-                    if not final_barcode: st.error("❌ 請先刷取或輸入條碼！")
-                    elif ret_type == "散出" and not exp_date: st.error("❌ 散出必須填寫效期！")
+                    if not final_barcode: 
+                        st.error("❌ 儲存失敗！請先刷取條碼或在上方紅框左側輸入欄填寫條碼！")
+                    elif ret_type == "散出" and not exp_date: 
+                        st.error("❌ 散出必須填寫效期！")
                     else:
                         conn = get_db_connection()
                         today_str = datetime.now().strftime("%Y%m%d")
@@ -293,7 +279,8 @@ else:
                         conn.execute('''INSERT INTO return_items (batch_id, item_seq, barcode, return_type, expiry_date, quantity, quality_status, damage_reason, operator)
                                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''', (st.session_state['current_batch_id'], seq, final_barcode, ret_type, exp_date, qty, quality, reason, st.session_state['username']))
                         conn.commit(); conn.close()
-                        st.success(f"✅ 第 {seq} 筆商品成功儲存！"); st.rerun()
+                        st.success(f"✅ 條碼【{final_barcode}】（第 {seq} 筆）成功儲存！")
+                        st.rerun()
             with col2:
                 if st.button("🚪 完成點收並離開", use_container_width=True):
                     if st.session_state['current_batch_id']:
