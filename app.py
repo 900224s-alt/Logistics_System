@@ -3,18 +3,6 @@ import sqlite3
 import pandas as pd
 from datetime import datetime
 
-# --- 顏色設定：莫蘭迪配色 ---
-st.markdown("""
-<style>
-    /* 儲存按鈕：莫蘭迪藍 */
-    .save-button button { background-color: #8da3b4 !important; color: white !important; }
-    /* 返回按鈕：莫蘭迪黃 */
-    .back-button button { background-color: #d4c4a8 !important; color: white !important; }
-    /* 關單按鈕：莫蘭迪紅 */
-    .close-button button { background-color: #c48b8b !important; color: white !important; }
-</style>
-""", unsafe_allow_html=True)
-
 st.set_page_config(page_title="物流退貨點收系統", layout="centered")
 
 ORIGINAL_ADMIN = "余宸緯"
@@ -117,25 +105,20 @@ else:
             reason = ", ".join(st.multiselect("勾選不良品原因", DAMAGE_REASONS)) if qual == "不良品" else ""
             remark = st.text_input("備註欄")
 
-            st.markdown('<div class="save-button">', unsafe_allow_html=True)
-            if st.button("💾 儲存並繼續新增", use_container_width=True):
+            # 儲存按鈕使用 primary (藍色)
+            if st.button("💾 儲存並繼續新增", use_container_width=True, type="primary"):
                 conn = get_db_connection()
                 conn.execute('INSERT INTO return_items (batch_id, barcode, return_type, expiry_date, quantity, quality_status, damage_reason, operator, approval_status, created_at, remark) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', 
                              (st.session_state['current_batch_id'], b_input, r_type, exp_date, qty, qual, reason, st.session_state['username'], '已確認', datetime.now().strftime("%Y-%m-%d %H:%M:%S"), remark))
                 conn.commit(); conn.close(); show_save_success(1)
-            st.markdown('</div>', unsafe_allow_html=True)
             
             c1, c2 = st.columns(2)
-            st.markdown('<div class="back-button">', unsafe_allow_html=True)
+            # 返回與結束使用預設顏色，配合 Emoji 區分
             if c1.button("🔙 返回 / 暫停作業", use_container_width=True):
                 st.session_state.update({'current_channel': "", 'current_batch_id': ""}); st.rerun()
-            st.markdown('</div>', unsafe_allow_html=True)
-            
-            st.markdown('<div class="close-button">', unsafe_allow_html=True)
             if c2.button("🛑 結束作業並關單", use_container_width=True):
                 conn = get_db_connection(); conn.execute("UPDATE return_batches SET status = '已完成' WHERE batch_id = ?", (st.session_state['current_batch_id'],)); conn.commit(); conn.close()
                 st.session_state.update({'current_channel': "", 'current_batch_id': ""}); st.rerun()
-            st.markdown('</div>', unsafe_allow_html=True)
 
     with tabs[1]:
         st.header("🔍 歷史紀錄與更正")
@@ -198,5 +181,5 @@ else:
         t_u = st.text_input("操作員工姓名").strip()
         c1, c2, c3 = st.columns(3)
         if c1.button("🎖️ 升職"): conn = get_db_connection(); conn.execute("UPDATE users SET role = '管理者' WHERE username = ?", (t_u,)); conn.commit(); conn.close(); st.rerun()
-        if c2.button("👤 降職"): conn = get_db_connection(); conn.execute("UPDATE users SET role = '一般用戶' WHERE username = ?", (t_u,)); conn.commit(); conn.close(); st.rerun()
+        if c2.button("👤 降職"): conn = c2.button("👤 降職"); conn = get_db_connection(); conn.execute("UPDATE users SET role = '一般用戶' WHERE username = ?", (t_u,)); conn.commit(); conn.close(); st.rerun()
         if c3.button("❌ 刪除"): conn = get_db_connection(); conn.execute("DELETE FROM users WHERE username = ?", (t_u,)); conn.commit(); conn.close(); st.rerun()
