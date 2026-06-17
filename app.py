@@ -6,7 +6,6 @@ from datetime import datetime
 st.set_page_config(page_title="物流退貨點收系統", layout="centered")
 
 ORIGINAL_ADMIN = "余宸緯"
-
 DAMAGE_REASONS = [
     "盒凹", "嚴重盒凹", "盒污", "畫痕", "已過期（一個月內）", "即期（兩個月內）", "短效（半年內）",
     "效期模糊", "批號模糊", "已開封", "已開封使用", "空盒", "膠膜破損", "膠膜嚴重破損", "膠膜污損",
@@ -33,7 +32,6 @@ init_db()
 @st.dialog("💾 儲存成功")
 def show_save_success(count):
     st.success("此筆條碼已成功建立！")
-    st.info(f"本批次目前已累計完成筆數：**{count} 筆**")
     if st.button("確認"): st.rerun()
 
 @st.dialog("⚠️ 系統提示")
@@ -137,28 +135,26 @@ else:
             edited_df = st.data_editor(df[cols], hide_index=True)
             
             selected = edited_df[edited_df["選取"] == True]
-            if not selected.empty:
-                st.subheader("🛠️ 資料更正申請")
-                act = st.selectbox("選擇動作", ["更正數量", "貨況轉換", "刪除資料"])
-                n_q, n_s, res = 0, "", ""
-                if act == "更正數量": n_q = st.number_input("新數量", step=1); res = st.text_input("說明原因")
-                elif act == "貨況轉換": 
-                    n_q = st.number_input("轉換數量", step=1)
-                    n_s = st.radio("新貨況", ["良品", "不良品"])
-                    if n_s == "不良品": res = ", ".join(st.multiselect("選取不良原因", DAMAGE_REASONS))
-                
-                if st.button("⚠️ 送出更正申請"):
-                    if act == "刪除資料" and not st.session_state.get('is_admin'): st.error("❌ 僅限管理員操作")
-                    else:
-                        conn = get_db_connection()
-                        for _, row in selected.iterrows():
-                            conn.execute("INSERT INTO change_requests (item_id, action, old_qty, new_qty, new_status, reason, status) VALUES (?, ?, ?, ?, ?, ?, '審核中')", 
-                                         (row['id'], act, row['quantity'], str(n_q), n_s, res))
-                        conn.commit(); conn.close(); show_alert("⚠️ 已申請成功，帶主管簽核，請先回報異常。")
+            st.subheader("🛠️ 異常修正操作區")
+            act = st.selectbox("選擇動作", ["更正數量", "貨況轉換", "刪除資料"])
+            n_q, n_s, res = 0, "", ""
+            if act == "更正數量": n_q = st.number_input("新數量", step=1); res = st.text_input("說明原因")
+            elif act == "貨況轉換": 
+                n_q = st.number_input("轉換數量", step=1); n_s = st.radio("新貨況", ["良品", "不良品"])
+                if n_s == "不良品": res = ", ".join(st.multiselect("勾選不良原因", DAMAGE_REASONS))
+            
+            if st.button("⚠️ 送出更正申請"):
+                if act == "刪除資料" and not st.session_state.get('is_admin'): st.error("❌ 僅限管理員操作")
+                else:
+                    conn = get_db_connection()
+                    for _, row in selected.iterrows():
+                        conn.execute("INSERT INTO change_requests (item_id, action, old_qty, new_qty, new_status, reason, status) VALUES (?, ?, ?, ?, ?, ?, '審核中')", (row['id'], act, row['quantity'], str(n_q), n_s, res))
+                    conn.commit(); conn.close(); show_alert("⚠️ 已申請成功，帶主管簽核，請先回報異常。")
 
     with tabs[2]:
         st.header("🔔 主管審核工作台")
         conn = get_db_connection(); review_df = pd.read_sql_query("SELECT * FROM change_requests WHERE status = '審核中'", conn); conn.close()
+        review_df.insert(0, "同意", False)
         reviewed_df = st.data_editor(review_df, column_config={"同意": st.column_config.CheckboxColumn(required=True)}, hide_index=True)
         if st.button("🟢 批量處理同意"):
             conn = get_db_connection()
