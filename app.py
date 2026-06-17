@@ -3,7 +3,7 @@ import sqlite3
 import pandas as pd
 from datetime import datetime
 
-# --- 莫蘭迪配色設定 ---
+# --- 莫蘭迪配色設定 (僅定義樣式，不改變版面) ---
 st.markdown("""
 <style>
     /* 儲存按鈕：莫蘭迪藍 */
@@ -38,6 +38,16 @@ def init_db():
     conn.commit(); conn.close()
 
 init_db()
+
+@st.dialog("💾 儲存成功")
+def show_save_success(count):
+    st.success("此筆條碼已成功建立！")
+    if st.button("確認"): st.rerun()
+
+@st.dialog("⚠️ 系統提示")
+def show_alert(message):
+    st.warning(message)
+    if st.button("確認"): st.rerun()
 
 if 'logged_in' not in st.session_state: st.session_state['logged_in'] = False
 if 'username' not in st.session_state: st.session_state['username'] = ""
@@ -99,16 +109,14 @@ else:
             st.info(f"🏬 通路：**{st.session_state.get('current_channel')}** ｜ 🧾 批號：**{st.session_state.get('current_batch_id')}**")
             b_input = st.text_input("🔍 請刷取商品條碼", key="barcode_field")
             r_type = st.radio("選擇退貨形態", ["箱出", "散出", "組出"], horizontal=True)
-            
-            # 效期檢查
             exp_date = st.text_input("有效期限 (格式:20260618 或填入：無效期)")
-            
             qty = st.number_input("輸入數量", min_value=1, step=1, value=1)
             qual = st.radio("商品貨況", ["良品", "不良品"], horizontal=True) if r_type != "箱出" else "良品"
             reason = ", ".join(st.multiselect("勾選不良品原因", DAMAGE_REASONS)) if qual == "不良品" else ""
             remark = st.text_input("備註欄")
 
             if st.button("💾 儲存並繼續新增", use_container_width=True, type="primary"):
+                # 嚴格驗證邏輯
                 if not exp_date:
                     st.error("⚠️ 效期為必填欄位 (若無請填入：無效期)")
                 elif exp_date != "無效期" and (len(exp_date) != 8 or not exp_date.isdigit()):
@@ -117,8 +125,7 @@ else:
                     conn = get_db_connection()
                     conn.execute('INSERT INTO return_items (batch_id, barcode, return_type, expiry_date, quantity, quality_status, damage_reason, operator, approval_status, created_at, remark) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', 
                                  (st.session_state['current_batch_id'], b_input, r_type, exp_date, qty, qual, reason, st.session_state['username'], '已確認', datetime.now().strftime("%Y-%m-%d %H:%M:%S"), remark))
-                    conn.commit(); conn.close()
-                    st.toast("✅ 儲存成功！")
+                    conn.commit(); conn.close(); show_save_success(1)
             
             c1, c2 = st.columns(2)
             if c1.button("🔙 返回 / 暫停作業", use_container_width=True, key="back-btn"):
