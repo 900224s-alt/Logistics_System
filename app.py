@@ -3,10 +3,6 @@ import sqlite3
 import pandas as pd  
 from datetime import datetime
 
-import os 
-if os.path.exists("return_system.db"):
-    os.remove("return_system.db")
-
 # --- 莫蘭迪配色設定 ---  
 st.markdown("""  
 <style>  
