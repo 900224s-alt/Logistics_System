@@ -1,14 +1,13 @@
 import streamlit as st
 import sqlite3
 import pandas as pd
-from datetime import datetime
-import pytz
+from datetime import datetime, timedelta
 
-# 設定台灣時區
-TAIWAN_TZ = pytz.timezone('Asia/Taipei')
-
+# --- 台灣時間處理 (直接使用標準庫，無需安裝額外套件) ---
 def get_now_str():
-    return datetime.now(TAIWAN_TZ).strftime("%Y-%m-%d %H:%M:%S")
+    # UTC+8
+    taiwan_time = datetime.utcnow() + timedelta(hours=8)
+    return taiwan_time.strftime("%Y-%m-%d %H:%M:%S")
 
 # --- 莫蘭迪配色設定 ---
 st.markdown("""
@@ -37,6 +36,7 @@ def init_db():
     cursor = conn.cursor()
     cursor.execute("CREATE TABLE IF NOT EXISTS users (username TEXT PRIMARY KEY, password TEXT, register_date TEXT, role TEXT)")
     cursor.execute("CREATE TABLE IF NOT EXISTS return_batches (batch_id TEXT PRIMARY KEY, channel TEXT, register_date TEXT, status TEXT)")
+    # 確保包含 expiry_date 與 created_at
     cursor.execute("CREATE TABLE IF NOT EXISTS return_items (id INTEGER PRIMARY KEY AUTOINCREMENT, batch_id TEXT, barcode TEXT, return_type TEXT, expiry_date TEXT, quantity INTEGER, quality_status TEXT, damage_reason TEXT, operator TEXT, approval_status TEXT, created_at TEXT, remark TEXT)")
     cursor.execute("CREATE TABLE IF NOT EXISTS change_requests (req_id INTEGER PRIMARY KEY AUTOINCREMENT, item_id INTEGER, action TEXT, old_qty INTEGER, new_qty INTEGER, new_status TEXT, reason TEXT, status TEXT)")
     conn.commit(); conn.close()
@@ -77,15 +77,15 @@ else:
     tabs = st.tabs(["📦 退貨點收作業", "🔍 歷史紀錄與更正", "🔔 主管審核工作台", "👥 員工權限維護"])
 
     with tabs[0]:
+        # (作業區塊邏輯保持不變)
         if not st.session_state.get('current_channel'):
             st.subheader("🚀 請設定本次作業環境與通路")
             chan = st.selectbox("🏬 選擇退貨通路", ["請選擇...", "MOMO", "寶雅", "康是美", "屈臣氏", "蝦皮", "家購", "大智通", "好市多","PCHPME","松本清","唐吉訶德"])
             if st.button("鎖定並開始作業", use_container_width=True):
                 if chan != "請選擇...":
-                    today = datetime.now(TAIWAN_TZ).strftime("%Y%m%d")
+                    bid = f"Back{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
                     conn = get_db_connection()
-                    bid = f"Back{today}{conn.execute('SELECT COUNT(*) FROM return_batches').fetchone()[0]+1:03d}"
-                    conn.execute("INSERT INTO return_batches VALUES (?, ?, ?, '作業中')", (bid, chan, today))
+                    conn.execute("INSERT INTO return_batches VALUES (?, ?, ?, '作業中')", (bid, chan, get_now_str()))
                     conn.commit(); conn.close()
                     st.session_state.update({'current_batch_id': bid, 'current_channel': chan}); st.rerun()
         else:
@@ -103,38 +103,37 @@ else:
 
     with tabs[1]:
         st.header("🔍 歷史紀錄與更正")
-        with st.expander("⚙️ 篩選條件設定"):
-            s_batch = st.text_input("查詢單號 (批號)")
-            if st.button("查詢數據"):
-                conn = get_db_connection()
-                df = pd.read_sql_query("SELECT * FROM return_items WHERE batch_id LIKE ?", conn, params=(f"%{s_batch}%",))
-                conn.close(); st.session_state['df'] = df
+        s_batch = st.text_input("查詢單號 (批號)")
+        if st.button("查詢數據"):
+            conn = get_db_connection()
+            df = pd.read_sql_query("SELECT * FROM return_items WHERE batch_id LIKE ?", conn, params=(f"%{s_batch}%",))
+            df['時間記錄'] = df['created_at'] # 新增時間欄位
+            conn.close(); st.session_state['df'] = df
 
         if 'df' in st.session_state and not st.session_state['df'].empty:
             df = st.session_state['df'].copy()
-            df['處理時間'] = df['created_at'] # 確保有處理時間欄位
             df.insert(0, "選取", False)
             edited_df = st.data_editor(df, hide_index=True)
-            
             act = st.selectbox("動作", ["更正數量", "貨況轉換", "刪除資料"])
-            n_q = st.number_input("新數值", step=1); res = st.text_input("說明")
+            n_q = st.number_input("新數值", step=1); res = st.text_input("原因")
             
             if st.button("⚠️ 送出更正申請"):
                 conn = get_db_connection()
-                for _, row in edited_df.iterrows():
+                for i, row in edited_df.iterrows():
                     if row.get('選取', False):
                         conn.execute("INSERT INTO change_requests (item_id, action, old_qty, new_qty, reason, status) VALUES (?, ?, ?, ?, ?, '審核中')", 
-                                     (int(row['id']), act, int(row['quantity']), str(n_q), res))
+                                     (row['id'], act, row['quantity'], str(n_q), res))
                 conn.commit(); conn.close(); st.warning("✅ 申請已送出")
 
     with tabs[2]:
+        # (主管區)
         st.header("🔔 主管審核工作台")
         conn = get_db_connection(); review_df = pd.read_sql_query("SELECT * FROM change_requests WHERE status = '審核中'", conn); conn.close()
         review_df.insert(0, "同意", False)
         reviewed_df = st.data_editor(review_df, hide_index=True)
         if st.button("🟢 批量處理"):
             conn = get_db_connection()
-            for _, row in reviewed_df.iterrows():
+            for i, row in reviewed_df.iterrows():
                 if row.get("同意"):
                     if row['action'] == "刪除資料": conn.execute("DELETE FROM return_items WHERE id = ?", (row['item_id'],))
                     elif row['action'] == "更正數量": conn.execute("UPDATE return_items SET quantity = ? WHERE id = ?", (row['new_qty'], row['item_id']))
@@ -142,9 +141,10 @@ else:
             conn.commit(); conn.close(); st.rerun()
 
     with tabs[3]:
+        # (權限區)
         st.header("👥 員工權限與離職維護")
         conn = get_db_connection(); st.dataframe(pd.read_sql_query("SELECT * FROM users", conn), use_container_width=True); conn.close()
-        t_u = st.text_input("操作員工姓名").strip()
+        t_u = st.text_input("操作員工姓名")
         c1, c2, c3 = st.columns(3)
         if c1.button("🎖️ 升職"): conn = get_db_connection(); conn.execute("UPDATE users SET role = '管理者' WHERE username = ?", (t_u,)); conn.commit(); conn.close(); st.rerun()
         if c2.button("👤 降職"): conn = get_db_connection(); conn.execute("UPDATE users SET role = '一般用戶' WHERE username = ?", (t_u,)); conn.commit(); conn.close(); st.rerun()
