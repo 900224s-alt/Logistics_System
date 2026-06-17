@@ -3,18 +3,6 @@ import sqlite3
 import pandas as pd
 from datetime import datetime
 
-# --- 莫蘭迪配色設定 (僅定義樣式，不改變版面) ---
-st.markdown("""
-<style>
-    /* 儲存按鈕：莫蘭迪藍 */
-    div.stButton > button[kind="primary"] { background-color: #8da3b4 !important; border: none !important; color: white !important; }
-    /* 返回/暫停：莫蘭迪黃 */
-    div.stButton > button#back-btn { background-color: #d4c4a8 !important; border: none !important; color: white !important; }
-    /* 關單按鈕：莫蘭迪紅 */
-    div.stButton > button#close-btn { background-color: #c48b8b !important; border: none !important; color: white !important; }
-</style>
-""", unsafe_allow_html=True)
-
 st.set_page_config(page_title="物流退貨點收系統", layout="centered")
 
 ORIGINAL_ADMIN = "余宸緯"
@@ -92,8 +80,11 @@ else:
             unfinished = conn.execute("SELECT batch_id, channel FROM return_batches WHERE status = '作業中'").fetchall()
             for b in unfinished:
                 count = conn.execute("SELECT COUNT(*) FROM return_items WHERE batch_id = ?", (b['batch_id'],)).fetchone()[0]
-                if st.button(f"繼續作業：{b['batch_id']} ({b['channel']}) | 已完成 {count} 筆"):
-                    st.session_state.update({'current_batch_id': b['batch_id'], 'current_channel': b['channel']}); st.rerun()
+                # 為「繼續作業」按鈕區塊加上淺黃色底色
+                with st.container():
+                    st.markdown(f"""<div style="background-color: #fff9c4; padding: 10px; border-radius: 5px; border: 1px solid #ffe082;"></div>""", unsafe_allow_html=True)
+                    if st.button(f"繼續作業：{b['batch_id']} ({b['channel']}) | 已完成 {count} 筆"):
+                        st.session_state.update({'current_batch_id': b['batch_id'], 'current_channel': b['channel']}); st.rerun()
             conn.close()
             env = st.radio("⚙️ 作業環境", ["正式環境", "測試環境"], horizontal=True) if st.session_state.get('is_admin') else "正式環境"
             chan = st.selectbox("🏬 選擇退貨通路", ["請選擇...", "MOMO", "寶雅", "康是美", "屈臣氏", "蝦皮", "家購", "大智通", "好市多","PCHPME","松本清","唐吉訶德"])
@@ -124,10 +115,9 @@ else:
                 conn.commit(); conn.close(); show_save_success(1)
             
             c1, c2 = st.columns(2)
-            # 透過自訂 ID 觸發 CSS 顏色
-            if c1.button("🔙 返回 / 暫停作業", key="back-btn"):
+            if c1.button("🔙 返回 / 暫停作業", use_container_width=True):
                 st.session_state.update({'current_channel': "", 'current_batch_id': ""}); st.rerun()
-            if c2.button("🛑 結束作業並關單", key="close-btn"):
+            if c2.button("🛑 結束作業並關單", use_container_width=True):
                 conn = get_db_connection(); conn.execute("UPDATE return_batches SET status = '已完成' WHERE batch_id = ?", (st.session_state['current_batch_id'],)); conn.commit(); conn.close()
                 st.session_state.update({'current_channel': "", 'current_batch_id': ""}); st.rerun()
 
