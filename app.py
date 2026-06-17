@@ -9,7 +9,7 @@ ORIGINAL_ADMIN = "余宸緯"
 
 # 定義 25 種異常原因清單
 DAMAGE_REASONS = [
-    "盒凹", "嚴重盒凹", "盒污", "劃痕", 
+    "盒凹", "嚴重盒凹", "盒污", "畫痕", 
     "已過期（一個月內）", "即期（兩個月內）", "短效（半年內）", 
     "效期模糊", "批號模糊", "已開封", "已開封使用", 
     "空盒", "膠膜破損", "膠膜嚴重破損", "膠膜污損", 
@@ -91,13 +91,14 @@ else:
     
     with tabs[0]:
         if st.session_state['current_channel'] == "":
-            st.subheader("🚀 請領取單號並設定作業環境")
+            st.subheader("🚀 請設定本次作業環境與通路")
             env_choice = st.radio("⚙️ 請選擇作業環境", ["正式環境", "測試環境"], horizontal=True) if st.session_state['is_admin'] else "正式環境"
             selected_chan = st.selectbox("🏬 選擇退貨通路", ["請選擇...", "MOMO", "寶雅", "康是美", "屈臣氏", "蝦皮", "家購", "大智通", "好市多","PCHPME","松本清","唐吉訶德"])
-            if st.button("🚀 領取單號並開始作業", use_container_width=True):
+            if st.button("鎖定並開始作業", use_container_width=True):
                 if selected_chan != "請選擇...":
                     st.session_state['current_channel'] = selected_chan
                     st.session_state['current_env'] = env_choice
+                    st.session_state['is_batch_saved'] = False 
                     today_str = datetime.now().strftime("%Y%m%d")
                     prefix = "TEST" if env_choice == "測試環境" else "Back"
                     conn = get_db_connection()
@@ -107,16 +108,29 @@ else:
                     st.rerun()
                 else: st.warning("⚠️ 請選擇通路！")
         else:
-            env_label = "⚠️【測試環境】" if st.session_state['current_env'] == "測試環境" else "🟢【正式環境】"
-            st.markdown(f"### {env_label}")
-            st.info(f"🏬 通路：**{st.session_state['current_channel']}** ｜ 🧾 領取批號：**{st.session_state['current_batch_id']}**")
+            # --- 作業進度儀表板 ---
+            st.info(f"🏬 通路：**{st.session_state['current_channel']}** ｜ 🧾 批號：**{st.session_state['current_batch_id']}**")
+            c1, c2, c3 = st.columns(3)
+            conn = get_db_connection()
+            data_now = conn.execute("SELECT COUNT(*), SUM(quantity) FROM return_items WHERE batch_id = ?", (st.session_state['current_batch_id'],)).fetchone()
+            bad_now = conn.execute("SELECT COUNT(*) FROM return_items WHERE batch_id = ? AND quality_status = '不良品'", (st.session_state['current_batch_id'],)).fetchone()
+            conn.close()
+            c1.metric("總點收筆數", data_now[0] or 0)
+            c2.metric("總數量", data_now[1] or 0)
+            c3.metric("不良品筆數", bad_now[0] or 0)
             
-            if st.button("⏹️ 結束作業/封單"):
+            # --- 暫停作業與返回 ---
+            c_nav1, c_nav2 = st.columns(2)
+            if c_nav1.button("⬅️ 返回通路選擇 (暫停作業)"):
                 st.session_state['current_channel'] = ""
                 st.session_state['current_batch_id'] = ""
                 st.rerun()
-            
+            if c_nav2.button("⏹️ 封單完成"):
+                st.session_state['current_channel'] = ""
+                st.session_state['current_batch_id'] = ""
+                st.rerun()
             st.markdown("---")
+            
             barcode_input = st.text_input("🔍 請刷取商品條碼或手動輸入", key="barcode_field")
             if barcode_input: st.success(f"📥 目前帶入條碼：**{barcode_input}**")
             
@@ -130,13 +144,13 @@ else:
                 if quality == "不良品":
                     selected_reasons = st.multiselect("勾選不良品原因", DAMAGE_REASONS)
                     reason = ", ".join(selected_reasons)
-                else:
-                    reason = ""
+                else: reason = ""
             
             if st.button("💾 儲存並繼續新增", use_container_width=True, type="primary"):
                 conn = get_db_connection()
-                # 確保批號寫入
-                conn.execute("INSERT OR IGNORE INTO return_batches VALUES (?, ?, ?, '作業中')", (st.session_state['current_batch_id'], st.session_state['current_channel'], datetime.now().strftime("%Y%m%d")))
+                if not st.session_state['is_batch_saved']:
+                    conn.execute("INSERT OR IGNORE INTO return_batches VALUES (?, ?, ?, '作業中')", (st.session_state['current_batch_id'], st.session_state['current_channel'], datetime.now().strftime("%Y%m%d")))
+                    st.session_state['is_batch_saved'] = True
                 created_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 conn.execute('''INSERT INTO return_items (batch_id, barcode, return_type, expiry_date, quantity, quality_status, damage_reason, operator, approval_status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, '已確認', ?)''', 
                             (st.session_state['current_batch_id'], barcode_input, ret_type, exp_date, qty, quality, reason, st.session_state['username'], created_time))
