@@ -3,13 +3,13 @@ import sqlite3
 import pandas as pd
 from datetime import datetime
 
-# --- 莫蘭迪色系樣式注入 ---
+# --- 莫蘭迪色系按鈕 CSS ---
 st.markdown("""
 <style>
-    /* 確保自訂按鈕顏色不會被完全覆蓋 */
-    .stButton > button.save-btn { background-color: #8da3b4 !important; color: white !important; }
-    .stButton > button.back-btn { background-color: #d4c4a8 !important; color: white !important; }
-    .stButton > button.close-btn { background-color: #c48b8b !important; color: white !important; }
+    .stButton > button { border-radius: 5px !important; border: none !important; color: white !important; font-weight: bold !important; }
+    .btn-save { background-color: #8da3b4 !important; }
+    .btn-back { background-color: #d4c4a8 !important; }
+    .btn-close { background-color: #c48b8b !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -115,7 +115,6 @@ else:
             reason = ", ".join(st.multiselect("勾選不良品原因", DAMAGE_REASONS)) if qual == "不良品" else ""
             remark = st.text_input("備註欄")
 
-            # 莫蘭迪按鈕區
             st.markdown('<div class="save-btn">', unsafe_allow_html=True)
             if st.button("💾 儲存並繼續新增", use_container_width=True):
                 conn = get_db_connection()
@@ -129,7 +128,6 @@ else:
             if c1.button("🔙 返回 / 暫停作業", use_container_width=True):
                 st.session_state.update({'current_channel': "", 'current_batch_id': ""}); st.rerun()
             st.markdown('</div>', unsafe_allow_html=True)
-            
             st.markdown('<div class="close-btn">', unsafe_allow_html=True)
             if c2.button("🛑 結束作業並關單", use_container_width=True):
                 conn = get_db_connection(); conn.execute("UPDATE return_batches SET status = '已完成' WHERE batch_id = ?", (st.session_state['current_batch_id'],)); conn.commit(); conn.close()
