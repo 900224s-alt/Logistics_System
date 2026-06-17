@@ -3,16 +3,22 @@ import sqlite3
 import pandas as pd
 from datetime import datetime
 
-# --- 莫蘭迪色系 CSS 設定 ---
+# --- 強化版莫蘭迪色系 CSS 設定 ---
 st.markdown("""
 <style>
-    div.stButton > button:first-child { border-radius: 5px; border: none; color: white; font-weight: bold; }
-    /* 莫蘭迪藍 - 儲存 */
-    .save-btn > button { background-color: #8da3b4 !important; }
-    /* 莫蘭迪黃 - 返回 */
-    .back-btn > button { background-color: #d4c4a8 !important; }
-    /* 莫蘭迪紅 - 關單 */
-    .close-btn > button { background-color: #c48b8b !important; }
+    /* 強制設定按鈕樣式 */
+    div.stButton > button {
+        border-radius: 5px !important;
+        border: none !important;
+        font-weight: bold !important;
+        transition: all 0.3s ease !important;
+    }
+    /* 莫蘭迪藍 (儲存) */
+    .save-btn button { background-color: #8da3b4 !important; color: white !important; }
+    /* 莫蘭迪黃 (返回) */
+    .back-btn button { background-color: #d4c4a8 !important; color: white !important; }
+    /* 莫蘭迪紅 (關單) */
+    .close-btn button { background-color: #c48b8b !important; color: white !important; }
 </style>
 """, unsafe_allow_html=True)
 
