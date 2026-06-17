@@ -26,7 +26,7 @@ def get_db_connection():
 def init_db():
     conn = get_db_connection()
     cursor = conn.cursor()
-    # 建立資料表 (確保 status 欄位存在以供審核)
+    # 建立資料表 (確保有 status 欄位)
     cursor.execute('''CREATE TABLE IF NOT EXISTS users 
                       (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE, password TEXT, register_date TEXT, role TEXT, status TEXT)''')
     cursor.execute('''CREATE TABLE IF NOT EXISTS return_batches 
@@ -223,7 +223,7 @@ else:
     with tabs[2]:
         st.header("🔔 主管修改批核")
         if st.session_state['is_admin']:
-            st.subheader("🔔 待審核帳號申請")
+            st.subheader("🔔 待審核帳號註冊")
             conn = get_db_connection()
             pending = pd.read_sql_query("SELECT id, username, register_date FROM users WHERE status = 'Pending'", conn)
             st.dataframe(pending, use_container_width=True)
