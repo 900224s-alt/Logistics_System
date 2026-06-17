@@ -80,11 +80,9 @@ else:
             unfinished = conn.execute("SELECT batch_id, channel FROM return_batches WHERE status = '作業中'").fetchall()
             for b in unfinished:
                 count = conn.execute("SELECT COUNT(*) FROM return_items WHERE batch_id = ?", (b['batch_id'],)).fetchone()[0]
-                # 為「繼續作業」按鈕區塊加上淺黃色底色
-                with st.container():
-                    st.markdown(f"""<div style="background-color: #fff9c4; padding: 10px; border-radius: 5px; border: 1px solid #ffe082;"></div>""", unsafe_allow_html=True)
-                    if st.button(f"繼續作業：{b['batch_id']} ({b['channel']}) | 已完成 {count} 筆"):
-                        st.session_state.update({'current_batch_id': b['batch_id'], 'current_channel': b['channel']}); st.rerun()
+                # 這裡改為紅字顯示
+                if st.button(f"繼續作業：:red[{b['batch_id']}] (:red[{b['channel']}]) | 已完成 {count} 筆"):
+                    st.session_state.update({'current_batch_id': b['batch_id'], 'current_channel': b['channel']}); st.rerun()
             conn.close()
             env = st.radio("⚙️ 作業環境", ["正式環境", "測試環境"], horizontal=True) if st.session_state.get('is_admin') else "正式環境"
             chan = st.selectbox("🏬 選擇退貨通路", ["請選擇...", "MOMO", "寶雅", "康是美", "屈臣氏", "蝦皮", "家購", "大智通", "好市多","PCHPME","松本清","唐吉訶德"])
@@ -108,6 +106,7 @@ else:
             reason = ", ".join(st.multiselect("勾選不良品原因", DAMAGE_REASONS)) if qual == "不良品" else ""
             remark = st.text_input("備註欄")
 
+            # 儲存按鈕設定為 type="primary" (淡藍色)
             if st.button("💾 儲存並繼續新增", use_container_width=True, type="primary"):
                 conn = get_db_connection()
                 conn.execute('INSERT INTO return_items (batch_id, barcode, return_type, expiry_date, quantity, quality_status, damage_reason, operator, approval_status, created_at, remark) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', 
