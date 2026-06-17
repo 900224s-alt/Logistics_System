@@ -79,7 +79,9 @@ else:
             conn = get_db_connection()
             unfinished = conn.execute("SELECT batch_id, channel FROM return_batches WHERE status = '作業中'").fetchall()
             for b in unfinished:
-                if st.button(f"繼續作業：{b['batch_id']} ({b['channel']})"):
+                # 統計該批次筆數
+                count = conn.execute("SELECT COUNT(*) FROM return_items WHERE batch_id = ?", (b['batch_id'],)).fetchone()[0]
+                if st.button(f"繼續作業：{b['batch_id']} ({b['channel']}) | 已完成 {count} 筆"):
                     st.session_state.update({'current_batch_id': b['batch_id'], 'current_channel': b['channel']}); st.rerun()
             conn.close()
             env = st.radio("⚙️ 作業環境", ["正式環境", "測試環境"], horizontal=True) if st.session_state.get('is_admin') else "正式環境"
@@ -110,8 +112,11 @@ else:
                              (st.session_state['current_batch_id'], b_input, r_type, exp_date, qty, qual, reason, st.session_state['username'], '已確認', datetime.now().strftime("%Y-%m-%d %H:%M:%S"), remark))
                 conn.commit(); conn.close(); show_save_success(1)
             
-            if st.button("🛑 結束作業並關單"):
+            c1, c2 = st.columns(2)
+            if c1.button("🛑 結束作業並關單"):
                 conn = get_db_connection(); conn.execute("UPDATE return_batches SET status = '已完成' WHERE batch_id = ?", (st.session_state['current_batch_id'],)); conn.commit(); conn.close()
+                st.session_state.update({'current_channel': "", 'current_batch_id': ""}); st.rerun()
+            if c2.button("🔙 返回/暫停作業"):
                 st.session_state.update({'current_channel': "", 'current_batch_id': ""}); st.rerun()
 
     with tabs[1]:
@@ -149,7 +154,7 @@ else:
                     conn = get_db_connection()
                     for _, row in selected.iterrows():
                         conn.execute("INSERT INTO change_requests (item_id, action, old_qty, new_qty, new_status, reason, status) VALUES (?, ?, ?, ?, ?, ?, '審核中')", (row['id'], act, row['quantity'], str(n_q), n_s, res))
-                    conn.commit(); conn.close(); show_alert("⚠️ 已申請成功，帶主管簽核，請先回報異常。")
+                    conn.commit(); conn.close(); show_alert("⚠️ 已申請成功，待主管簽核，請先回報異常。")
 
     with tabs[2]:
         st.header("🔔 主管審核工作台")
