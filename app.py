@@ -7,6 +7,17 @@ st.set_page_config(page_title="物流退貨點收系統", layout="centered")
 
 ORIGINAL_ADMIN = "余宸緯" 
 
+# 定義 25 種異常原因清單
+DAMAGE_REASONS = [
+    "盒凹", "嚴重盒凹", "盒污", "畫痕", 
+    "已過期（一個月內）", "即期（兩個月內）", "短效（半年內）", 
+    "效期模糊", "批號模糊", "已開封", "已開封使用", 
+    "空盒", "膠膜破損", "膠膜嚴重破損", "膠膜污損", 
+    "色差", "漸層色差", "嚴重色差", "霧氣", 
+    "漏液", "嚴重漏液", "外盒有貼標籤", "外膜有貼標籤", 
+    "外膜有貼膠帶+盒內有貼標籤", "外盒有貼膠帶+盒內有貼標籤"
+]
+
 def get_db_connection():
     conn = sqlite3.connect('return_system.db')
     conn.row_factory = sqlite3.Row
@@ -82,7 +93,7 @@ else:
         if st.session_state['current_channel'] == "":
             st.subheader("🚀 請設定本次作業環境與通路")
             env_choice = st.radio("⚙️ 請選擇作業環境", ["正式環境", "測試環境"], horizontal=True) if st.session_state['is_admin'] else "正式環境"
-            selected_chan = st.selectbox("🏬 選擇退貨通路", ["請選擇...", "MOMO", "寶雅", "康是美", "屈臣氏", "蝦皮", "家購", "大智通","松本清", "PCHOME", "好市多"])
+            selected_chan = st.selectbox("🏬 選擇退貨通路", ["請選擇...", "MOMO", "寶雅", "康是美", "屈臣氏", "蝦皮", "家購", "大智通", "好市多"])
             if st.button("鎖定並開始作業", use_container_width=True):
                 if selected_chan != "請選擇...":
                     st.session_state['current_channel'] = selected_chan
@@ -104,12 +115,18 @@ else:
             if barcode_input: st.success(f"📥 目前帶入條碼：**{barcode_input}**")
             st.markdown("---")
             ret_type = st.radio("選擇退貨形態", ["箱出", "散出"], horizontal=True)
-            qty, exp_date, quality, reason = 1, "", "良品", ""
+            qty, exp_date, quality, selected_reasons = 1, "", "良品", []
+            
             if ret_type == "散出":
                 exp_date = st.text_input("輸入有效期限 (例: 202706)")
                 qty = st.number_input("輸入數量", min_value=1, value=1)
                 quality = st.radio("商品貨況", ["良品", "不良品"], horizontal=True)
-                if quality == "不良品": reason = st.text_input("請輸入不良品異常原因")
+                if quality == "不良品":
+                    # 【核心修改】：使用複選清單
+                    selected_reasons = st.multiselect("勾選不良品原因", DAMAGE_REASONS)
+                    reason = ", ".join(selected_reasons)
+                else:
+                    reason = ""
             
             if st.button("💾 儲存並繼續新增", use_container_width=True, type="primary"):
                 conn = get_db_connection()
@@ -133,7 +150,7 @@ else:
             s_operator = c4.text_input("作業員")
             s_type = c5.multiselect("形態", ["箱出", "散出"])
             c6, c7 = st.columns(2)
-            s_channel = c6.multiselect("通路", ["MOMO", "寶雅", "康是美", "屈臣氏", "蝦皮", "家購", "大智通","松本清", "PCHOME", "好市多"])
+            s_channel = c6.multiselect("通路", ["MOMO", "寶雅", "康是美", "屈臣氏", "蝦皮", "家購", "大智通", "好市多"])
             s_quality = c7.multiselect("貨況", ["良品", "不良品"])
             
             if st.button("查詢數據"):
