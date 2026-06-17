@@ -15,26 +15,15 @@ def get_db_connection():
 def init_db():
     conn = get_db_connection()
     cursor = conn.cursor()
-    # 建立資料表 (確保 status 欄位存在)
-    cursor.execute('''CREATE TABLE IF NOT EXISTS users 
-                      (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE, password TEXT, register_date TEXT, role TEXT, status TEXT)''')
-    cursor.execute('''CREATE TABLE IF NOT EXISTS return_batches 
-                      (batch_id TEXT PRIMARY KEY, channel TEXT, date TEXT, status TEXT)''')
-    cursor.execute('''CREATE TABLE IF NOT EXISTS return_items 
-                      (id INTEGER PRIMARY KEY AUTOINCREMENT, batch_id TEXT, barcode TEXT, return_type TEXT, 
-                       expiry_date TEXT, quantity INTEGER, quality_status TEXT, damage_reason TEXT, 
-                       operator TEXT, approval_status TEXT, created_at TEXT)''')
-    
-    try:
-        cursor.execute("ALTER TABLE return_items ADD COLUMN created_at TEXT")
-    except sqlite3.OperationalError:
-        pass 
-    conn.commit()
+    cursor.execute("PRAGMA table_info(return_items)")
+    columns = [row[1] for row in cursor.fetchall()]
+    if 'created_at' not in columns:
+        conn.execute("ALTER TABLE return_items ADD COLUMN created_at TEXT")
+        conn.commit()
     conn.close()
 
 init_db()
 
-# Session State 初始化
 if 'logged_in' not in st.session_state: st.session_state['logged_in'] = False
 if 'username' not in st.session_state: st.session_state['username'] = ""
 if 'is_admin' not in st.session_state: st.session_state['is_admin'] = False
@@ -46,7 +35,7 @@ if 'is_batch_saved' not in st.session_state: st.session_state['is_batch_saved'] 
 st.title("📦 物流退貨點收系統")
 
 if not st.session_state['logged_in']:
-    tab1, tab2 = st.tabs(["👤 帳號登入", "📝 申請註冊帳號"])
+    tab1, tab2 = st.tabs(["👤 帳號登入", "📝 新人員註冊"])
     with tab1:
         st.subheader("使用者登入")
         login_name = st.text_input("請輸入中文真實姓名", key="login_name").strip()
@@ -57,28 +46,26 @@ if not st.session_state['logged_in']:
                 user = conn.execute('SELECT * FROM users WHERE username = ? AND password = ?', (login_name, login_pwd)).fetchone()
                 conn.close()
                 if user:
-                    if user['status'] == 'Active':
-                        st.session_state['logged_in'] = True
-                        st.session_state['username'] = login_name
-                        st.session_state['is_admin'] = (user['role'] == "管理者" or login_name == ORIGINAL_ADMIN)
-                        st.success(f"🎉 歡迎【{login_name}】上工。")
-                        st.rerun()
-                    else:
-                        st.warning("⚠️ 帳號申請審核中，請聯繫管理員。")
+                    st.session_state['logged_in'] = True
+                    st.session_state['username'] = login_name
+                    st.session_state['is_admin'] = (user['role'] == "管理者" or login_name == ORIGINAL_ADMIN)
+                    st.success(f"🎉 歡迎【{login_name}】上工。")
+                    st.rerun()
                 else: st.error("❌ 姓名或密碼錯誤。")
             else: st.warning("⚠️ 請輸入姓名與密碼。")
     with tab2:
-        st.subheader("申請註冊帳號")
+        st.subheader("新人員註冊")
         reg_name = st.text_input("請輸入你的中文真實姓名", key="reg_name").strip()
         reg_pwd = st.text_input("自訂密碼", type="password", key="reg_pwd")
-        if st.button("送出申請", use_container_width=True):
+        if st.button("建立帳號", use_container_width=True):
             if reg_name and reg_pwd:
                 conn = get_db_connection()
                 try:
-                    conn.execute('INSERT INTO users (username, password, register_date, role, status) VALUES (?, ?, ?, ?, ?)', 
-                                 (reg_name, reg_pwd, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "一般用戶", "Pending"))
+                    initial_role = "管理者" if reg_name == ORIGINAL_ADMIN else "一般用戶"
+                    conn.execute('INSERT INTO users (username, password, register_date, role) VALUES (?, ?, ?, ?)', 
+                                 (reg_name, reg_pwd, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), initial_role))
                     conn.commit()
-                    st.success("👍 申請已送出，請等待管理員核准後方可登入。")
+                    st.success(f"👍 【{reg_name}】註冊成功！身分：{initial_role}。請切換到[帳號登入]。")
                 except sqlite3.IntegrityError: st.error("❌ 這個姓名已被註冊。")
                 finally: conn.close()
             else: st.warning("⚠️ 欄位不能留空。")
@@ -89,7 +76,7 @@ else:
         st.session_state.clear()
         st.rerun()
 
-    tabs = st.tabs(["📦 退貨點收作業", "🔍 歷史紀錄與更正", "🔔 主管審核工作台", "👥 員工權限與離職維護"])
+    tabs = st.tabs(["📦 退貨點收作業", "🔍 歷史紀錄與修改申請", "🔔 主管修改批核", "👥 員工權限與離職維護"])
     
     with tabs[0]:
         if st.session_state['current_channel'] == "":
@@ -175,6 +162,10 @@ else:
         if 'df' in st.session_state and not st.session_state['df'].empty:
             df = st.session_state['df'].copy()
             df.rename(columns={'channel': '通路'}, inplace=True)
+            dt = pd.to_datetime(df["created_at"])
+            df.insert(0, "建立日期", dt.dt.strftime('%Y-%m-%d'))
+            cols = ['建立日期', '通路'] + [c for c in df.columns if c not in ['建立日期', '通路', 'item_seq', 'created_at']]
+            df = df.reindex(columns=cols)
             st.dataframe(df, use_container_width=True, hide_index=True)
             
             st.subheader("🛠️ 資料更正操作")
@@ -203,52 +194,37 @@ else:
 
     with tabs[2]:
         st.header("🔔 主管審核工作台")
-        if st.session_state['is_admin']:
-            st.subheader("待審核帳號申請")
-            conn = get_db_connection()
-            pending_users = pd.read_sql_query("SELECT id, username, register_date FROM users WHERE status = 'Pending'", conn)
-            st.dataframe(pending_users, use_container_width=True)
-            app_user_id = st.number_input("輸入欲審核的用戶 ID", min_value=1, step=1)
-            role_select = st.selectbox("指定該用戶權限", ["一般用戶", "管理者"])
-            if st.button("🟢 核准此帳號"):
-                conn.execute("UPDATE users SET status = 'Active', role = ? WHERE id = ?", (role_select, app_user_id))
-                conn.commit(); conn.close(); st.success("帳號已啟用！"); st.rerun()
-            
-            st.markdown("---")
-            st.subheader("更正與刪除審核")
-            review_df = pd.read_sql_query("SELECT * FROM return_items WHERE approval_status IN ('審核中', '申請刪除')", conn)
-            conn.close()
-            if not review_df.empty:
-                st.dataframe(review_df, use_container_width=True)
-                app_id = st.number_input("輸入欲處理的審核單 ID", min_value=1, step=1)
-                c_a, c_b = st.columns(2)
-                if c_a.button("🟢 同意變更"):
-                    conn = get_db_connection()
-                    status = conn.execute("SELECT approval_status FROM return_items WHERE id = ?", (app_id,)).fetchone()
-                    if status and status[0] == '申請刪除':
-                        conn.execute("DELETE FROM return_items WHERE id = ?", (app_id,))
-                    else:
-                        conn.execute("UPDATE return_items SET approval_status = '已確認' WHERE id = ?", (app_id,))
-                    conn.commit(); conn.close(); st.success("處理成功！"); st.rerun()
-                if c_b.button("🔴 駁回申請"):
-                    conn = get_db_connection(); conn.execute("UPDATE return_items SET approval_status = '已確認' WHERE id = ?", (app_id,)); conn.commit(); conn.close(); st.rerun()
-            else: st.info("目前無待審核案件。")
-        else: st.error("您沒有管理權限。")
+        conn = get_db_connection()
+        review_df = pd.read_sql_query("SELECT * FROM return_items WHERE approval_status IN ('審核中', '申請刪除')", conn)
+        conn.close()
+        if not review_df.empty:
+            st.dataframe(review_df, use_container_width=True)
+            app_id = st.number_input("輸入欲處理的審核單 ID", min_value=1, step=1)
+            c_a, c_b = st.columns(2)
+            if c_a.button("🟢 同意變更"):
+                conn = get_db_connection()
+                status = conn.execute("SELECT approval_status FROM return_items WHERE id = ?", (app_id,)).fetchone()
+                if status and status[0] == '申請刪除':
+                    conn.execute("DELETE FROM return_items WHERE id = ?", (app_id,))
+                else:
+                    conn.execute("UPDATE return_items SET approval_status = '已確認' WHERE id = ?", (app_id,))
+                conn.commit(); conn.close(); st.success("處理成功！"); st.rerun()
+            if c_b.button("🔴 駁回申請"):
+                conn = get_db_connection(); conn.execute("UPDATE return_items SET approval_status = '已確認' WHERE id = ?", (app_id,)); conn.commit(); conn.close(); st.rerun()
+        else: st.info("目前無待審核案件。")
 
     with tabs[3]:
         st.header("👥 員工權限與離職維護")
-        if st.session_state['is_admin']:
-            conn = get_db_connection()
-            users_df = pd.read_sql_query("SELECT username AS 中文姓名, register_date AS 註冊日期, role AS 目前身分, status AS 狀態 FROM users", conn)
-            conn.close()
-            st.dataframe(users_df, use_container_width=True)
-            st.markdown("---")
-            target_user = st.text_input("請輸入要操作的員工姓名").strip()
-            c1, c2, c3 = st.columns(3)
-            if c1.button("🎖️ 升職為管理者"):
-                conn = get_db_connection(); conn.execute("UPDATE users SET role = '管理者' WHERE username = ?", (target_user,)); conn.commit(); conn.close(); st.rerun()
-            if c2.button("👤 降職為一般用戶"):
-                conn = get_db_connection(); conn.execute("UPDATE users SET role = '一般用戶' WHERE username = ?", (target_user,)); conn.commit(); conn.close(); st.rerun()
-            if c3.button("❌ 刪除此用戶"):
-                conn = get_db_connection(); conn.execute("DELETE FROM users WHERE username = ?", (target_user,)); conn.commit(); conn.close(); st.rerun()
-        else: st.error("您沒有管理權限。")
+        conn = get_db_connection()
+        users_df = pd.read_sql_query("SELECT username AS 中文姓名, register_date AS 註冊日期, role AS 目前身分 FROM users", conn)
+        conn.close()
+        st.dataframe(users_df, use_container_width=True)
+        st.markdown("---")
+        target_user = st.text_input("請輸入要操作的員工姓名").strip()
+        c1, c2, c3 = st.columns(3)
+        if c1.button("🎖️ 升職為管理者"):
+            conn = get_db_connection(); conn.execute("UPDATE users SET role = '管理者' WHERE username = ?", (target_user,)); conn.commit(); conn.close(); st.rerun()
+        if c2.button("👤 降職為一般用戶"):
+            conn = get_db_connection(); conn.execute("UPDATE users SET role = '一般用戶' WHERE username = ?", (target_user,)); conn.commit(); conn.close(); st.rerun()
+        if c3.button("❌ 刪除此用戶"):
+            conn = get_db_connection(); conn.execute("DELETE FROM users WHERE username = ?", (target_user,)); conn.commit(); conn.close(); st.rerun()
