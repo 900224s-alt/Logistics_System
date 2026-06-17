@@ -8,7 +8,7 @@ st.set_page_config(page_title="物流退貨點收系統", layout="centered")
 ORIGINAL_ADMIN = "余宸緯"   
 
 DAMAGE_REASONS = [  
-    "盒凹", "嚴重盒凹", "盒污", "劃痕", "已過期（一個月內）", "即期（兩個月內）", "短效（半年內）",  
+    "盒凹", "嚴重盒凹", "盒污", "畫痕", "已過期（一個月內）", "即期（兩個月內）", "短效（半年內）",  
     "效期模糊", "批號模糊", "已開封", "已開封使用", "空盒", "膠膜破損", "膠膜嚴重破損", "膠膜污損",  
     "色差", "漸層色差", "嚴重色差", "霧氣", "漏液", "嚴重漏液", "外盒有貼標籤", "外膜有貼標籤",  
     "外膜有貼膠帶+盒內有貼標籤", "外盒有貼膠帶+盒內有貼標籤"  
@@ -57,7 +57,6 @@ if not st.session_state['logged_in']:
             if user:  
                 st.session_state.update({'logged_in': True, 'username': login_name, 'is_admin': (user['role'] == "管理者" or login_name == ORIGINAL_ADMIN)})  
                 st.rerun()  
-            else: st.error("❌ 姓名或密碼錯誤。")  
     with tab2:  
         reg_name = st.text_input("請輸入你的中文真實姓名", key="reg_name").strip()  
         reg_pwd = st.text_input("自訂密碼", type="password", key="reg_pwd")  
@@ -73,7 +72,7 @@ else:
     st.sidebar.write(f"👤 作業員：**{st.session_state['username']}**")  
     if st.sidebar.button("登出系統"): st.session_state.clear(); st.rerun()  
 
-    tabs = st.tabs(["📦 退貨點收作業", "🔍 歷史紀錄與修改申請", "🔔 主管修改批核", "👥 員工權限與離職維護"])  
+    tabs = st.tabs(["📦 退貨點收作業", "🔍 歷史紀錄與更正", "🔔 主管審核工作台", "👥 員工權限維護"])  
     
     with tabs[0]:  
         if st.session_state['current_channel'] == "":  
@@ -81,13 +80,12 @@ else:
             conn = get_db_connection()
             unfinished = conn.execute("SELECT batch_id, channel FROM return_batches WHERE status = '作業中'").fetchall()
             if unfinished:
-                st.warning("⚠️ 發現有未完成的單，請選擇繼續：")
+                st.warning("⚠️ 發現有未完成的單：")
                 for b in unfinished:
                     if st.button(f"繼續作業：{b['batch_id']} ({b['channel']})"):
                         st.session_state.update({'current_batch_id': b['batch_id'], 'current_channel': b['channel']})
                         st.rerun()
             conn.close()
-            
             env = st.radio("⚙️ 作業環境", ["正式環境", "測試環境"], horizontal=True) if st.session_state.get('is_admin') else "正式環境"  
             chan = st.selectbox("🏬 選擇退貨通路", ["請選擇...", "MOMO", "寶雅", "康是美", "屈臣氏", "蝦皮", "家購", "大智通", "好市多","PCHPME","松本清","唐吉訶德"])  
             if st.button("鎖定並開始作業", use_container_width=True):  
@@ -104,14 +102,13 @@ else:
         else:  
             st.info(f"🏬 通路：**{st.session_state['current_channel']}** ｜ 🧾 批號：**{st.session_state['current_batch_id']}**")  
             b_input = st.text_input("🔍 請刷取商品條碼", key="barcode_field")  
-            
             if b_input:
-                st.success(f"📥 目前帶入條碼：**{b_input}**")
                 if b_input in ["4710155288739", "4710155287558"]: st.warning("⚠️ 提醒：勿拆成單品單件")
-                if b_input in ["4710155284779", "4710155285837", "4710155281877", "4710155274527"]: st.warning("⚠️ 提醒：請額外裝箱並貼上大字報（好壞品分開放）")
-                if b_input in ["4710155282249", "4710155277528", "4710155279522", "4710155277573", "4710155282188", "4710155285653", "4710155285912", "4710155278921", "4710155282386", "4710155278860"]: st.warning("⚠️ 提醒：需退回工廠商品，請額外裝箱並貼上大字報（好壞品分開放）")
+                if b_input in ["4710155284779", "4710155285837", "4710155281877", "4710155274527"]: st.warning("⚠️ 提醒：請額外裝箱並貼上大字報")
+                if b_input in ["4710155282249", "4710155277528", "4710155279522", "4710155277573", "4710155282188", "4710155285653", "4710155285912", "4710155278921", "4710155282386", "4710155278860"]: st.warning("⚠️ 提醒：需退回工廠，請額外裝箱")
 
-            r_type = st.radio("選擇退貨形態", ["箱出", "散出"], horizontal=True)  
+            r_type = st.radio("形態", ["箱出", "散出"], horizontal=True)  
+            qty = st.number_input("輸入數量", min_value=1, value=1)
             qual = st.radio("商品貨況", ["良品", "不良品"], horizontal=True)
             reason = ", ".join(st.multiselect("勾選不良品原因", DAMAGE_REASONS)) if qual == "不良品" else ""
             
@@ -119,10 +116,10 @@ else:
                 conn = get_db_connection()  
                 status = '審核中' if qual == '不良品' else '已確認'
                 conn.execute('INSERT INTO return_items (batch_id, barcode, return_type, quantity, quality_status, damage_reason, operator, approval_status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', 
-                             (st.session_state['current_batch_id'], b_input, r_type, 1, qual, reason, st.session_state['username'], status, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))  
+                             (st.session_state['current_batch_id'], b_input, r_type, qty, qual, reason, st.session_state['username'], status, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))  
                 count = conn.execute("SELECT COUNT(*) FROM return_items WHERE batch_id = ?", (st.session_state['current_batch_id'],)).fetchone()[0]
                 conn.commit(); conn.close()
-                if qual == "不良品": st.error("⚠️ 已送出異常申請，待主管簽核，請先和主管回報異常。")
+                if qual == "不良品": st.error("⚠️ 已送出異常申請，待主管簽核，請先回報。")
                 show_save_success(count)
 
             c1, c2 = st.columns(2)
@@ -136,11 +133,19 @@ else:
 
     with tabs[1]:
         st.header("🔍 歷史紀錄與更正")
-        s_batch = st.text_input("輸入批號篩選")
-        if st.button("查詢"):
-            conn = get_db_connection()
-            df = pd.read_sql_query("SELECT * FROM return_items WHERE batch_id LIKE ?", conn, params=(f"%{s_batch}%",))
-            conn.close(); st.dataframe(df, use_container_width=True)
+        with st.expander("⚙️ 篩選條件設定", expanded=True):
+            c1, c2 = st.columns(2)
+            s_start = c1.date_input("開始日期", value=None)
+            s_end = c2.date_input("結束日期", value=None)
+            s_batch = st.text_input("退貨單號 (批號)")
+            if st.button("查詢數據"):
+                conn = get_db_connection()
+                query = "SELECT * FROM return_items WHERE 1=1"
+                params = []
+                if s_batch: query += " AND batch_id LIKE ?"; params.append(f"%{s_batch}%")
+                df = pd.read_sql_query(query, conn, params=params)
+                conn.close(); st.session_state['df'] = df
+        if 'df' in st.session_state: st.dataframe(st.session_state['df'], use_container_width=True)
 
     with tabs[2]:
         st.header("🔔 主管審核工作台")
@@ -155,11 +160,8 @@ else:
     with tabs[3]:
         st.header("👥 員工權限與離職維護")
         conn = get_db_connection()
-        users_df = pd.read_sql_query("SELECT username AS 中文姓名, register_date AS 註冊日期, role AS 目前身分 FROM users", conn)
-        conn.close()
-        st.dataframe(users_df, use_container_width=True)
-        st.markdown("---")
-        target_user = st.text_input("請輸入要操作的員工姓名").strip()
+        st.dataframe(pd.read_sql_query("SELECT * FROM users", conn), use_container_width=True)
+        target_user = st.text_input("操作員工姓名").strip()
         c1, c2, c3 = st.columns(3)
         if c1.button("🎖️ 升職為管理者"):
             conn = get_db_connection(); conn.execute("UPDATE users SET role = '管理者' WHERE username = ?", (target_user,)); conn.commit(); conn.close(); st.rerun()
