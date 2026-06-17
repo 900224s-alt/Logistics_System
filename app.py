@@ -133,7 +133,7 @@ else:
             s_operator = c4.text_input("作業員")
             s_type = c5.multiselect("形態", ["箱出", "散出"])
             c6, c7 = st.columns(2)
-            s_channel = c6.multiselect("通路", ["MOMO", "寶雅", "康是美", "屈臣氏", "蝦皮", "家購", "大智通", "好市多"])
+            s_channel = c6.multiselect("通路", ["MOMO", "寶雅", "康是美", "屈臣氏", "蝦皮", "家購", "大智通","松本清", "PCHOME", "好市多"])
             s_quality = c7.multiselect("貨況", ["良品", "不良品"])
             
             if st.button("查詢數據"):
