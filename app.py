@@ -142,13 +142,19 @@ else:
                 act = st.selectbox("選擇動作", ["更正數量", "貨況轉換", "刪除資料"])
                 n_q, n_s, res = 0, "", ""
                 if act == "更正數量": n_q = st.number_input("新數量", step=1); res = st.text_input("說明原因")
-                elif act == "貨況轉換": n_q = st.number_input("轉換數量", step=1); n_s = st.radio("新貨況", ["良品", "不良品"]); res = ", ".join(st.multiselect("勾選不良原因", DAMAGE_REASONS)) if n_s == "不良品" else ""
+                elif act == "貨況轉換": 
+                    n_q = st.number_input("轉換數量", step=1)
+                    n_s = st.radio("新貨況", ["良品", "不良品"])
+                    if n_s == "不良品": res = ", ".join(st.multiselect("選取不良原因", DAMAGE_REASONS))
                 
                 if st.button("⚠️ 送出更正申請"):
-                    conn = get_db_connection()
-                    for _, row in selected.iterrows():
-                        conn.execute("INSERT INTO change_requests (item_id, action, old_qty, new_qty, new_status, reason, status) VALUES (?, ?, ?, ?, ?, ?, '審核中')", (row['id'], act, row['quantity'], str(n_q), n_s, res))
-                    conn.commit(); conn.close(); show_alert("⚠️ 已申請成功，帶主管簽核，請先回報異常。")
+                    if act == "刪除資料" and not st.session_state.get('is_admin'): st.error("❌ 僅限管理員操作")
+                    else:
+                        conn = get_db_connection()
+                        for _, row in selected.iterrows():
+                            conn.execute("INSERT INTO change_requests (item_id, action, old_qty, new_qty, new_status, reason, status) VALUES (?, ?, ?, ?, ?, ?, '審核中')", 
+                                         (row['id'], act, row['quantity'], str(n_q), n_s, res))
+                        conn.commit(); conn.close(); show_alert("⚠️ 已申請成功，帶主管簽核，請先回報異常。")
 
     with tabs[2]:
         st.header("🔔 主管審核工作台")
