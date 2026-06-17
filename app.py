@@ -78,20 +78,15 @@ else:
             st.subheader("🚀 請設定本次作業環境與通路")
             conn = get_db_connection()
             unfinished = conn.execute("SELECT batch_id, channel FROM return_batches WHERE status = '作業中'").fetchall()
-            
-            # --- 強化版視覺底色區塊 ---
-            if unfinished:
-                st.markdown("""
-                    <div style="background-color: #f8f9fa; padding: 15px; border-radius: 10px; border: 1px solid #dee2e6; box-shadow: 2px 2px 8px #e0e0e0; margin-bottom: 20px;">
-                        <h4 style="margin-top:0;">📋 待續作業批次</h4>
+            for b in unfinished:
+                count = conn.execute("SELECT COUNT(*) FROM return_items WHERE batch_id = ?", (b['batch_id'],)).fetchone()[0]
+                # 將按鈕區塊加上淺黃色背景與邊框，讓它看起來更顯眼
+                st.markdown(f"""
+                    <div style="background-color: #fff9c4; padding: 10px; border-radius: 5px; border: 1px solid #fbc02d; margin-bottom: 5px;">
                     </div>
                 """, unsafe_allow_html=True)
-                for b in unfinished:
-                    count = conn.execute("SELECT COUNT(*) FROM return_items WHERE batch_id = ?", (b['batch_id'],)).fetchone()[0]
-                    if st.button(f"繼續作業：{b['batch_id']} ({b['channel']}) | 已完成 {count} 筆"):
-                        st.session_state.update({'current_batch_id': b['batch_id'], 'current_channel': b['channel']}); st.rerun()
-            # ---------------------------
-            
+                if st.button(f"繼續作業：{b['batch_id']} ({b['channel']}) | 已完成 {count} 筆"):
+                    st.session_state.update({'current_batch_id': b['batch_id'], 'current_channel': b['channel']}); st.rerun()
             conn.close()
             env = st.radio("⚙️ 作業環境", ["正式環境", "測試環境"], horizontal=True) if st.session_state.get('is_admin') else "正式環境"
             chan = st.selectbox("🏬 選擇退貨通路", ["請選擇...", "MOMO", "寶雅", "康是美", "屈臣氏", "蝦皮", "家購", "大智通", "好市多","PCHPME","松本清","唐吉訶德"])
