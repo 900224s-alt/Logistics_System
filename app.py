@@ -29,16 +29,6 @@ def init_db():
 
 init_db()
 
-@st.dialog("💾 儲存成功")
-def show_save_success(count):
-    st.success("此筆條碼已成功建立！")
-    if st.button("確認"): st.rerun()
-
-@st.dialog("⚠️ 系統提示")
-def show_alert(message):
-    st.warning(message)
-    if st.button("確認"): st.rerun()
-
 if 'logged_in' not in st.session_state: st.session_state['logged_in'] = False
 if 'username' not in st.session_state: st.session_state['username'] = ""
 
@@ -79,7 +69,6 @@ else:
             conn = get_db_connection()
             unfinished = conn.execute("SELECT batch_id, channel FROM return_batches WHERE status = '作業中'").fetchall()
             for b in unfinished:
-                # 統計該批次筆數
                 count = conn.execute("SELECT COUNT(*) FROM return_items WHERE batch_id = ?", (b['batch_id'],)).fetchone()[0]
                 if st.button(f"繼續作業：{b['batch_id']} ({b['channel']}) | 已完成 {count} 筆"):
                     st.session_state.update({'current_batch_id': b['batch_id'], 'current_channel': b['channel']}); st.rerun()
@@ -110,13 +99,15 @@ else:
                 conn = get_db_connection()
                 conn.execute('INSERT INTO return_items (batch_id, barcode, return_type, expiry_date, quantity, quality_status, damage_reason, operator, approval_status, created_at, remark) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', 
                              (st.session_state['current_batch_id'], b_input, r_type, exp_date, qty, qual, reason, st.session_state['username'], '已確認', datetime.now().strftime("%Y-%m-%d %H:%M:%S"), remark))
-                conn.commit(); conn.close(); show_save_success(1)
+                conn.commit(); conn.close()
+                st.success("✅ 儲存成功！")
             
+            # 這裡新增您要求的按鈕配置
             c1, c2 = st.columns(2)
-            if c1.button("🛑 結束作業並關單"):
-                conn = get_db_connection(); conn.execute("UPDATE return_batches SET status = '已完成' WHERE batch_id = ?", (st.session_state['current_batch_id'],)); conn.commit(); conn.close()
+            if c1.button("🔙 返回 / 暫停作業", use_container_width=True):
                 st.session_state.update({'current_channel': "", 'current_batch_id': ""}); st.rerun()
-            if c2.button("🔙 返回/暫停作業"):
+            if c2.button("🛑 結束作業並關單", use_container_width=True, type="primary"):
+                conn = get_db_connection(); conn.execute("UPDATE return_batches SET status = '已完成' WHERE batch_id = ?", (st.session_state['current_batch_id'],)); conn.commit(); conn.close()
                 st.session_state.update({'current_channel': "", 'current_batch_id': ""}); st.rerun()
 
     with tabs[1]:
@@ -154,7 +145,7 @@ else:
                     conn = get_db_connection()
                     for _, row in selected.iterrows():
                         conn.execute("INSERT INTO change_requests (item_id, action, old_qty, new_qty, new_status, reason, status) VALUES (?, ?, ?, ?, ?, ?, '審核中')", (row['id'], act, row['quantity'], str(n_q), n_s, res))
-                    conn.commit(); conn.close(); show_alert("⚠️ 已申請成功，待主管簽核，請先回報異常。")
+                    conn.commit(); conn.close(); st.warning("⚠️ 已申請成功，帶主管簽核，請先回報異常。")
 
     with tabs[2]:
         st.header("🔔 主管審核工作台")
