@@ -33,8 +33,13 @@ def init_db():
     cursor = conn.cursor() 
     cursor.execute("CREATE TABLE IF NOT EXISTS users (username TEXT PRIMARY KEY, password TEXT, register_date TEXT, role TEXT)") 
     cursor.execute("CREATE TABLE IF NOT EXISTS return_batches (batch_id TEXT PRIMARY KEY, channel TEXT, register_date TEXT, status TEXT)") 
-    # 確保資料表結構一致
+    # 建立表結構
     cursor.execute("CREATE TABLE IF NOT EXISTS return_items (id INTEGER PRIMARY KEY AUTOINCREMENT, batch_id TEXT, barcode TEXT, return_type TEXT, expiry_date TEXT, quantity INTEGER, quality_status TEXT, damage_reason TEXT, operator TEXT, approval_status TEXT, created_at TEXT, remark TEXT)") 
+    # 補救措施：若欄位真的不存在，補上它 (不影響現有資料)
+    try:
+        cursor.execute("ALTER TABLE return_items ADD COLUMN expiry_date TEXT")
+    except:
+        pass
     cursor.execute("CREATE TABLE IF NOT EXISTS change_requests (req_id INTEGER PRIMARY KEY AUTOINCREMENT, item_id INTEGER, action TEXT, old_qty INTEGER, new_qty INTEGER, new_status TEXT, reason TEXT, status TEXT)") 
     conn.commit(); conn.close() 
 
@@ -113,13 +118,9 @@ else:
                     st.error("❌ 效期格式錯誤，應為 8 位數字 (例如 20260618) 或 '無效期'") 
                 else: 
                     conn = get_db_connection() 
-                    # 修正 INSERT 語法與欄位對應
-                    conn.execute('''INSERT INTO return_items 
-                                    (batch_id, barcode, return_type, expiry_date, quantity, quality_status, damage_reason, operator, approval_status, created_at, remark) 
-                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''', 
+                    conn.execute('''INSERT INTO return_items (batch_id, barcode, return_type, expiry_date, quantity, quality_status, damage_reason, operator, approval_status, created_at, remark) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''', 
                                     (st.session_state['current_batch_id'], b_input, r_type, exp_date, qty, qual, reason, st.session_state['username'], '已確認', datetime.now().strftime("%Y-%m-%d %H:%M:%S"), remark)) 
-                    conn.commit(); conn.close() 
-                    st.toast("✅ 儲存成功！") 
+                    conn.commit(); conn.close(); st.success("✅ 儲存成功！") 
             
             c1, c2 = st.columns(2) 
             if c1.button("🔙 返回 / 暫停作業", use_container_width=True, key="back-btn"): 
@@ -147,23 +148,15 @@ else:
             df.insert(0, "選取", False) 
             cols = ['選取', '建立日期', '通路'] + [c for c in df.columns if c not in ['選取', '建立日期', '通路', 'id', 'created_at']] 
             edited_df = st.data_editor(df[cols], hide_index=True) 
-            
             selected = edited_df[edited_df["選取"] == True] 
             st.subheader("🛠️ 異常修正操作區") 
             act = st.selectbox("選擇動作", ["更正數量", "貨況轉換", "刪除資料"]) 
-            n_q, n_s, res = 0, "", "" 
-            if act == "更正數量": n_q = st.number_input("新數量", step=1); res = st.text_input("說明原因") 
-            elif act == "貨況轉換": 
-                n_q = st.number_input("轉換數量", step=1); n_s = st.radio("新貨況", ["良品", "不良品"]) 
-                if n_s == "不良品": res = ", ".join(st.multiselect("勾選不良原因", DAMAGE_REASONS)) 
-            
+            n_q = st.number_input("新數值", step=1); res = st.text_input("原因") 
             if st.button("⚠️ 送出更正申請"): 
-                if act == "刪除資料" and not st.session_state.get('is_admin'): st.error("❌ 僅限管理員操作") 
-                else: 
-                    conn = get_db_connection() 
-                    for _, row in selected.iterrows(): 
-                        conn.execute("INSERT INTO change_requests (item_id, action, old_qty, new_qty, new_status, reason, status) VALUES (?, ?, ?, ?, ?, ?, '審核中')", (row['id'], act, row['quantity'], str(n_q), n_s, res)) 
-                    conn.commit(); conn.close(); st.warning("⚠️ 已申請成功，帶主管簽核，請先回報異常。") 
+                conn = get_db_connection() 
+                for _, row in selected.iterrows(): 
+                    conn.execute("INSERT INTO change_requests (item_id, action, old_qty, new_qty, reason, status) VALUES (?, ?, ?, ?, ?, '審核中')", (row['id'], act, row['quantity'], str(n_q), res)) 
+                conn.commit(); conn.close(); st.warning("已送出申請") 
 
     with tabs[2]: 
         st.header("🔔 主管審核工作台") 
@@ -174,12 +167,8 @@ else:
             conn = get_db_connection() 
             for _, row in reviewed_df.iterrows(): 
                 if row.get("同意"): 
-                    item = conn.execute("SELECT * FROM return_items WHERE id = ?", (row['item_id'],)).fetchone() 
                     if row['action'] == "刪除資料": conn.execute("DELETE FROM return_items WHERE id = ?", (row['item_id'],)) 
                     elif row['action'] == "更正數量": conn.execute("UPDATE return_items SET quantity = ? WHERE id = ?", (row['new_qty'], row['item_id'])) 
-                    elif row['action'] == "貨況轉換": 
-                        conn.execute("UPDATE return_items SET quantity = ? WHERE id = ?", (item['quantity'] - int(row['new_qty']), row['item_id'])) 
-                        conn.execute("INSERT INTO return_items (batch_id, barcode, return_type, quantity, quality_status, damage_reason, approval_status, created_at) VALUES (?, ?, ?, ?, ?, ?, '已確認', ?)", (item['batch_id'], item['barcode'], item['return_type'], row['new_qty'], row['new_status'], row['reason'], datetime.now().strftime("%Y-%m-%d %H:%M:%S"))) 
                     conn.execute("UPDATE change_requests SET status = '已確認' WHERE req_id = ?", (row['req_id'],)) 
             conn.commit(); conn.close(); st.rerun() 
 
