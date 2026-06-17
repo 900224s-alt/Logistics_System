@@ -26,9 +26,6 @@ def init_db():
     cursor.execute("CREATE TABLE IF NOT EXISTS return_batches (batch_id TEXT PRIMARY KEY, channel TEXT, register_date TEXT, status TEXT)")
     cursor.execute("CREATE TABLE IF NOT EXISTS return_items (id INTEGER PRIMARY KEY AUTOINCREMENT, batch_id TEXT, barcode TEXT, return_type TEXT, expiry_date TEXT, quantity INTEGER, quality_status TEXT, damage_reason TEXT, operator TEXT, approval_status TEXT, created_at TEXT, remark TEXT)")
     cursor.execute("CREATE TABLE IF NOT EXISTS change_requests (req_id INTEGER PRIMARY KEY AUTOINCREMENT, item_id INTEGER, action TEXT, new_val TEXT, new_status TEXT, reason TEXT, status TEXT)")
-    cursor.execute("PRAGMA table_info(return_batches)")
-    if 'status' not in [row[1] for row in cursor.fetchall()]:
-        conn.execute("ALTER TABLE return_batches ADD COLUMN status TEXT")
     conn.commit(); conn.close()
 
 init_db()
@@ -133,44 +130,43 @@ else:
             c6, c7 = st.columns(2); s_channel = c6.multiselect("通路", ["MOMO", "寶雅", "康是美", "屈臣氏", "蝦皮", "家購", "大智通", "好市多","PCHPME","松本清","唐吉訶德"]); s_quality = c7.multiselect("貨況", ["良品", "不良品"])
             if st.button("查詢數據"):
                 conn = get_db_connection()
-                query = "SELECT i.*, b.channel FROM return_items i LEFT JOIN return_batches b ON i.batch_id = b.batch_id WHERE 1=1"
-                params = []
-                if s_batch: query += " AND i.batch_id LIKE ?"; params.append(f"%{s_batch}%")
+                query = "SELECT i.*, b.channel FROM return_items i LEFT JOIN return_batches b ON i.batch_id = b.batch_id WHERE i.batch_id LIKE ?"
+                params = [f"%{s_batch}%"]
                 df = pd.read_sql_query(query, conn, params=params); conn.close(); st.session_state['df'] = df
 
         if 'df' in st.session_state and not st.session_state['df'].empty:
             df = st.session_state['df'].copy()
             df['建立日期'] = pd.to_datetime(df['created_at']).dt.strftime('%Y-%m-%d')
             df.rename(columns={'channel': '通路'}, inplace=True)
-            cols = ['建立日期', '通路'] + [c for c in df.columns if c not in ['建立日期', '通路', 'id', 'created_at']]
-            # 增加選取欄位
             df.insert(0, "選取", False)
-            edited_df = st.data_editor(df, column_config={"選取": st.column_config.CheckboxColumn(required=True)}, hide_index=True)
-            
-            selected = edited_df[edited_df["選取"] == True]
+            cols = ['選取', '建立日期', '通路'] + [c for c in df.columns if c not in ['選取', '建立日期', '通路', 'id', 'created_at']]
+            edited_df = st.data_editor(df[cols], use_container_width=True, hide_index=True)
             st.download_button("📥 下載 CSV", df.to_csv(index=False).encode('utf-8-sig'), "data.csv")
             
-            st.subheader("🛠️ 資料更正")
-            act = st.selectbox("選擇動作", ["更正數量", "貨況轉換", "刪除資料"])
-            n_q, n_s, res = 0, "", ""
-            if act == "更正數量": n_q = st.number_input("新數量", step=1); res = st.text_input("說明原因")
-            elif act == "貨況轉換": n_q = st.number_input("轉換數量", step=1); n_s = st.radio("新貨況", ["良品", "不良品"]); res = ", ".join(st.multiselect("勾選不良原因", DAMAGE_REASONS)) if n_s == "不良品" else ""
-            
-            if st.button("⚠️ 送出更正申請"):
-                if act == "刪除資料" and not st.session_state.get('is_admin'): st.error("❌ 僅限管理者可刪除")
-                else:
-                    conn = get_db_connection()
-                    for idx, row in selected.iterrows():
-                        conn.execute("INSERT INTO change_requests (item_id, action, new_val, new_status, reason, status) VALUES (?, ?, ?, ?, ?, '審核中')", (row['id'], act, str(n_q), n_s, res))
-                    conn.commit(); conn.close(); show_alert("⚠️ 已申請成功，帶主管簽核，請先回報異常。")
+            selected = edited_df[edited_df["選取"] == True]
+            if not selected.empty:
+                st.subheader("🛠️ 資料更正")
+                act = st.selectbox("選擇動作", ["更正數量", "貨況轉換", "刪除資料"])
+                n_q, n_s, res = 0, "", ""
+                if act == "更正數量": n_q = st.number_input("新數量", step=1); res = st.text_input("說明原因")
+                elif act == "貨況轉換": n_q = st.number_input("轉換數量", step=1); n_s = st.radio("新貨況", ["良品", "不良品"]); res = ", ".join(st.multiselect("勾選不良原因", DAMAGE_REASONS)) if n_s == "不良品" else ""
+                
+                if st.button("⚠️ 送出更正申請"):
+                    if act == "刪除資料" and not st.session_state.get('is_admin'): st.error("❌ 僅限管理者可刪除")
+                    else:
+                        conn = get_db_connection()
+                        for _, row in selected.iterrows():
+                            conn.execute("INSERT INTO change_requests (item_id, action, new_val, new_status, reason, status) VALUES (?, ?, ?, ?, ?, '審核中')", (row['id'], act, str(n_q), n_s, res))
+                        conn.commit(); conn.close(); show_alert("⚠️ 已申請成功，帶主管簽核，請先回報異常。")
 
     with tabs[2]:
         st.header("🔔 主管審核工作台")
         conn = get_db_connection(); review_df = pd.read_sql_query("SELECT * FROM change_requests WHERE status = '審核中'", conn); conn.close()
+        review_df.insert(0, "同意", False)
         reviewed_df = st.data_editor(review_df, column_config={"同意": st.column_config.CheckboxColumn(required=True)}, hide_index=True)
         if st.button("🟢 批量處理同意"):
             conn = get_db_connection()
-            for idx, row in reviewed_df.iterrows():
+            for _, row in reviewed_df.iterrows():
                 if row.get("同意"):
                     if row['action'] == "刪除資料": conn.execute("DELETE FROM return_items WHERE id = ?", (row['item_id'],))
                     else: conn.execute("UPDATE return_items SET quantity = ?, quality_status = ?, damage_reason = ? WHERE id = ?", (row['new_val'], row['new_status'], row['reason'], row['item_id']))
@@ -180,8 +176,8 @@ else:
     with tabs[3]:
         st.header("👥 員工權限與離職維護")
         conn = get_db_connection(); st.dataframe(pd.read_sql_query("SELECT * FROM users", conn), use_container_width=True); conn.close()
-        t_u = st.text_input("操作員工姓名").strip()
+        target_user = st.text_input("操作員工姓名").strip()
         c1, c2, c3 = st.columns(3)
-        if c1.button("🎖️ 升職"): conn = get_db_connection(); conn.execute("UPDATE users SET role = '管理者' WHERE username = ?", (t_u,)); conn.commit(); conn.close(); st.rerun()
-        if c2.button("👤 降職"): conn = get_db_connection(); conn.execute("UPDATE users SET role = '一般用戶' WHERE username = ?", (t_u,)); conn.commit(); conn.close(); st.rerun()
-        if c3.button("❌ 刪除"): conn = get_db_connection(); conn.execute("DELETE FROM users WHERE username = ?", (t_u,)); conn.commit(); conn.close(); st.rerun()
+        if c1.button("🎖️ 升職"): conn = get_db_connection(); conn.execute("UPDATE users SET role = '管理者' WHERE username = ?", (target_user,)); conn.commit(); conn.close(); st.rerun()
+        if c2.button("👤 降職"): conn = get_db_connection(); conn.execute("UPDATE users SET role = '一般用戶' WHERE username = ?", (target_user,)); conn.commit(); conn.close(); st.rerun()
+        if c3.button("❌ 刪除"): conn = get_db_connection(); conn.execute("DELETE FROM users WHERE username = ?", (target_user,)); conn.commit(); conn.close(); st.rerun()
