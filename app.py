@@ -107,19 +107,26 @@ else:
                 if b_input in ["4710155284779", "4710155285837", "4710155281877", "4710155274527"]: st.warning("⚠️ 提醒：請額外裝箱並貼上大字報")
                 if b_input in ["4710155282249", "4710155277528", "4710155279522", "4710155277573", "4710155282188", "4710155285653", "4710155285912", "4710155278921", "4710155282386", "4710155278860"]: st.warning("⚠️ 提醒：需退回工廠，請額外裝箱")
 
-            r_type = st.radio("形態", ["箱出", "散出"], horizontal=True)  
-            qty = st.number_input("輸入數量", min_value=1, value=1)
-            qual = st.radio("商品貨況", ["良品", "不良品"], horizontal=True)
-            reason = ", ".join(st.multiselect("勾選不良品原因", DAMAGE_REASONS)) if qual == "不良品" else ""
+            r_type = st.radio("選擇退貨形態", ["箱出", "散出", "組出"], horizontal=True)  
+            
+            qty, exp_date, qual, reason = 1, "", "良品", ""
+            if r_type == "散出":
+                exp_date = st.text_input("有效期限 (例: 202706)")
+                qty = st.number_input("輸入數量", min_value=1, value=1)
+                qual = st.radio("商品貨況", ["良品", "不良品"], horizontal=True)
+                if qual == "不良品": reason = ", ".join(st.multiselect("勾選不良品原因", DAMAGE_REASONS))
+            elif r_type == "組出":
+                qty = st.number_input("輸入數量", min_value=1, value=1)
+                qual = st.radio("商品貨況", ["良品", "不良品"], horizontal=True)
             
             if st.button("💾 儲存並繼續新增", use_container_width=True, type="primary"):  
                 conn = get_db_connection()  
                 status = '審核中' if qual == '不良品' else '已確認'
-                conn.execute('INSERT INTO return_items (batch_id, barcode, return_type, quantity, quality_status, damage_reason, operator, approval_status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', 
-                             (st.session_state['current_batch_id'], b_input, r_type, qty, qual, reason, st.session_state['username'], status, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))  
+                conn.execute('INSERT INTO return_items (batch_id, barcode, return_type, expiry_date, quantity, quality_status, damage_reason, operator, approval_status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', 
+                             (st.session_state['current_batch_id'], b_input, r_type, exp_date, qty, qual, reason, st.session_state['username'], status, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))  
                 count = conn.execute("SELECT COUNT(*) FROM return_items WHERE batch_id = ?", (st.session_state['current_batch_id'],)).fetchone()[0]
                 conn.commit(); conn.close()
-                if qual == "不良品": st.error("⚠️ 已送出異常申請，待主管簽核，請先回報。")
+                if qual == "不良品": st.error("⚠️ 已送出異常申請，待主管簽核。")
                 show_save_success(count)
 
             c1, c2 = st.columns(2)
@@ -141,7 +148,7 @@ else:
             c3, c4, c5 = st.columns(3)  
             s_barcode = c3.text_input("商品條碼")  
             s_operator = c4.text_input("作業員")  
-            s_type = c5.multiselect("形態", ["箱出", "散出"])  
+            s_type = c5.multiselect("形態", ["箱出", "散出", "組出"])  
             c6, c7 = st.columns(2)  
             s_channel = c6.multiselect("通路", ["MOMO", "寶雅", "康是美", "屈臣氏", "蝦皮", "家購", "大智通", "好市多","PCHPME","松本清","唐吉訶德"])  
             s_quality = c7.multiselect("貨況", ["良品", "不良品"])  
@@ -155,23 +162,14 @@ else:
                 if s_batch: query += " AND i.batch_id LIKE ?"; params.append(f"%{s_batch}%")  
                 if s_barcode: query += " AND i.barcode LIKE ?"; params.append(f"%{s_barcode}%")  
                 if s_operator: query += " AND i.operator LIKE ?"; params.append(f"%{s_operator}%")  
-                if s_type:  
-                    query += f" AND i.return_type IN ({','.join(['?']*len(s_type))})"  
-                    params.extend(s_type)  
-                if s_channel:  
-                    query += f" AND b.channel IN ({','.join(['?']*len(s_channel))})"  
-                    params.extend(s_channel)  
-                if s_quality:  
-                    query += f" AND i.quality_status IN ({','.join(['?']*len(s_quality))})"  
-                    params.extend(s_quality)  
+                if s_type: query += f" AND i.return_type IN ({','.join(['?']*len(s_type))})"; params.extend(s_type)  
+                if s_channel: query += f" AND b.channel IN ({','.join(['?']*len(s_channel))})"; params.extend(s_channel)  
+                if s_quality: query += f" AND i.quality_status IN ({','.join(['?']*len(s_quality))})"; params.extend(s_quality)  
                 df = pd.read_sql_query(query, conn, params=params); conn.close()  
                 st.session_state['df'] = df  
 
         if 'df' in st.session_state and not st.session_state['df'].empty:  
             df = st.session_state['df'].copy()  
-            df.rename(columns={'channel': '通路'}, inplace=True)  
-            dt = pd.to_datetime(df["created_at"])  
-            df.insert(0, "建立日期", dt.dt.strftime('%Y-%m-%d'))  
             st.dataframe(df, use_container_width=True, hide_index=True)
 
     with tabs[2]:
