@@ -82,7 +82,7 @@ else:
         if st.session_state['current_channel'] == "":
             st.subheader("🚀 請設定本次作業環境與通路")
             env_choice = st.radio("⚙️ 請選擇作業環境", ["正式環境", "測試環境"], horizontal=True) if st.session_state['is_admin'] else "正式環境"
-            selected_chan = st.selectbox("🏬 選擇退貨通路", ["請選擇...", "MOMO", "寶雅", "康是美", "屈臣氏", "蝦皮", "家購", "大智通", "好市多"])
+            selected_chan = st.selectbox("🏬 選擇退貨通路", ["請選擇...", "MOMO", "寶雅", "康是美", "屈臣氏", "蝦皮", "家購", "大智通","松本清", "PCHOME", "好市多"])
             if st.button("鎖定並開始作業", use_container_width=True):
                 if selected_chan != "請選擇...":
                     st.session_state['current_channel'] = selected_chan
