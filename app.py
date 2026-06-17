@@ -78,10 +78,20 @@ else:
             st.subheader("🚀 請設定本次作業環境與通路")
             conn = get_db_connection()
             unfinished = conn.execute("SELECT batch_id, channel FROM return_batches WHERE status = '作業中'").fetchall()
-            for b in unfinished:
-                count = conn.execute("SELECT COUNT(*) FROM return_items WHERE batch_id = ?", (b['batch_id'],)).fetchone()[0]
-                if st.button(f"繼續作業：{b['batch_id']} ({b['channel']}) | 已完成 {count} 筆"):
-                    st.session_state.update({'current_batch_id': b['batch_id'], 'current_channel': b['channel']}); st.rerun()
+            
+            # --- 強化版視覺底色區塊 ---
+            if unfinished:
+                st.markdown("""
+                    <div style="background-color: #f8f9fa; padding: 15px; border-radius: 10px; border: 1px solid #dee2e6; box-shadow: 2px 2px 8px #e0e0e0; margin-bottom: 20px;">
+                        <h4 style="margin-top:0;">📋 待續作業批次</h4>
+                    </div>
+                """, unsafe_allow_html=True)
+                for b in unfinished:
+                    count = conn.execute("SELECT COUNT(*) FROM return_items WHERE batch_id = ?", (b['batch_id'],)).fetchone()[0]
+                    if st.button(f"繼續作業：{b['batch_id']} ({b['channel']}) | 已完成 {count} 筆"):
+                        st.session_state.update({'current_batch_id': b['batch_id'], 'current_channel': b['channel']}); st.rerun()
+            # ---------------------------
+            
             conn.close()
             env = st.radio("⚙️ 作業環境", ["正式環境", "測試環境"], horizontal=True) if st.session_state.get('is_admin') else "正式環境"
             chan = st.selectbox("🏬 選擇退貨通路", ["請選擇...", "MOMO", "寶雅", "康是美", "屈臣氏", "蝦皮", "家購", "大智通", "好市多","PCHPME","松本清","唐吉訶德"])
@@ -105,7 +115,6 @@ else:
             reason = ", ".join(st.multiselect("勾選不良品原因", DAMAGE_REASONS)) if qual == "不良品" else ""
             remark = st.text_input("備註欄")
 
-            # 儲存按鈕使用 primary (藍色)
             if st.button("💾 儲存並繼續新增", use_container_width=True, type="primary"):
                 conn = get_db_connection()
                 conn.execute('INSERT INTO return_items (batch_id, barcode, return_type, expiry_date, quantity, quality_status, damage_reason, operator, approval_status, created_at, remark) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', 
@@ -113,7 +122,6 @@ else:
                 conn.commit(); conn.close(); show_save_success(1)
             
             c1, c2 = st.columns(2)
-            # 返回與結束使用預設顏色，配合 Emoji 區分
             if c1.button("🔙 返回 / 暫停作業", use_container_width=True):
                 st.session_state.update({'current_channel': "", 'current_batch_id': ""}); st.rerun()
             if c2.button("🛑 結束作業並關單", use_container_width=True):
@@ -181,5 +189,5 @@ else:
         t_u = st.text_input("操作員工姓名").strip()
         c1, c2, c3 = st.columns(3)
         if c1.button("🎖️ 升職"): conn = get_db_connection(); conn.execute("UPDATE users SET role = '管理者' WHERE username = ?", (t_u,)); conn.commit(); conn.close(); st.rerun()
-        if c2.button("👤 降職"): conn = c2.button("👤 降職"); conn = get_db_connection(); conn.execute("UPDATE users SET role = '一般用戶' WHERE username = ?", (t_u,)); conn.commit(); conn.close(); st.rerun()
+        if c2.button("👤 降職"): conn = get_db_connection(); conn.execute("UPDATE users SET role = '一般用戶' WHERE username = ?", (t_u,)); conn.commit(); conn.close(); st.rerun()
         if c3.button("❌ 刪除"): conn = get_db_connection(); conn.execute("DELETE FROM users WHERE username = ?", (t_u,)); conn.commit(); conn.close(); st.rerun()
