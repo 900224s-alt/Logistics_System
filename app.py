@@ -2,8 +2,17 @@ import streamlit as st
 import sqlite3
 import pandas as pd
 from datetime import datetime
-
-st.set_page_config(page_title="物流退貨點收系統", layout="centered")
+# --- 莫蘭迪配色設定 (僅定義樣式，不改變版面) ---
+st.markdown("""
+<style>
+    /* 儲存按鈕：莫蘭迪藍 */
+    div.stButton > button[kind="primary"] { background-color: #8da3b4 !important; border: none !important; color: white !important; }
+    /* 返回/暫停：莫蘭迪黃 */
+    div.stButton > button#back-btn { background-color: #d4c4a8 !important; border: none !important; color: white !important; }
+    /* 關單按鈕：莫蘭迪紅 */
+    div.stButton > button#close-btn { background-color: #c48b8b !important; border: none !important; color: white !important; }
+</style>
+""", unsafe_allow_html=True)
 
 ORIGINAL_ADMIN = "余宸緯"
 DAMAGE_REASONS = [
