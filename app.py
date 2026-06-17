@@ -2,6 +2,7 @@ import streamlit as st
 import sqlite3
 import pandas as pd
 from datetime import datetime
+
 # --- 莫蘭迪配色設定 (僅定義樣式，不改變版面) ---
 st.markdown("""
 <style>
@@ -89,7 +90,6 @@ else:
             unfinished = conn.execute("SELECT batch_id, channel FROM return_batches WHERE status = '作業中'").fetchall()
             for b in unfinished:
                 count = conn.execute("SELECT COUNT(*) FROM return_items WHERE batch_id = ?", (b['batch_id'],)).fetchone()[0]
-                # 這裡改為紅字顯示
                 if st.button(f"繼續作業：:red[{b['batch_id']}] (:red[{b['channel']}]) | 已完成 {count} 筆"):
                     st.session_state.update({'current_batch_id': b['batch_id'], 'current_channel': b['channel']}); st.rerun()
             conn.close()
@@ -109,23 +109,32 @@ else:
             st.info(f"🏬 通路：**{st.session_state.get('current_channel')}** ｜ 🧾 批號：**{st.session_state.get('current_batch_id')}**")
             b_input = st.text_input("🔍 請刷取商品條碼", key="barcode_field")
             r_type = st.radio("選擇退貨形態", ["箱出", "散出", "組出"], horizontal=True)
+            
+            # 效期檢查與必填邏輯
+            exp_date = st.text_input("有效期限 (格式:20260618 或輸入：無效期)")
+            
             qty = st.number_input("輸入數量", min_value=1, step=1, value=1)
-            exp_date = st.text_input("有效期限") if r_type != "箱出" else ""
             qual = st.radio("商品貨況", ["良品", "不良品"], horizontal=True) if r_type != "箱出" else "良品"
             reason = ", ".join(st.multiselect("勾選不良品原因", DAMAGE_REASONS)) if qual == "不良品" else ""
             remark = st.text_input("備註欄")
 
-            # 儲存按鈕設定為 type="primary" (淡藍色)
+            # 藍色按鈕 (primary)
             if st.button("💾 儲存並繼續新增", use_container_width=True, type="primary"):
-                conn = get_db_connection()
-                conn.execute('INSERT INTO return_items (batch_id, barcode, return_type, expiry_date, quantity, quality_status, damage_reason, operator, approval_status, created_at, remark) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', 
-                             (st.session_state['current_batch_id'], b_input, r_type, exp_date, qty, qual, reason, st.session_state['username'], '已確認', datetime.now().strftime("%Y-%m-%d %H:%M:%S"), remark))
-                conn.commit(); conn.close(); show_save_success(1)
+                if not exp_date:
+                    st.error("⚠️ 請輸入有效期限 (無效期請填：無效期)")
+                elif exp_date != "無效期" and (len(exp_date) != 8 or not exp_date.isdigit()):
+                    st.error("❌ 效期格式錯誤，請輸入 8 位數年月日 或 '無效期'")
+                else:
+                    conn = get_db_connection()
+                    conn.execute('INSERT INTO return_items (batch_id, barcode, return_type, expiry_date, quantity, quality_status, damage_reason, operator, approval_status, created_at, remark) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', 
+                                 (st.session_state['current_batch_id'], b_input, r_type, exp_date, qty, qual, reason, st.session_state['username'], '已確認', datetime.now().strftime("%Y-%m-%d %H:%M:%S"), remark))
+                    conn.commit(); conn.close()
+                    show_save_success(1)
             
             c1, c2 = st.columns(2)
-            if c1.button("🔙 返回 / 暫停作業", use_container_width=True):
+            if c1.button("🔙 返回 / 暫停作業", use_container_width=True, key="back-btn"):
                 st.session_state.update({'current_channel': "", 'current_batch_id': ""}); st.rerun()
-            if c2.button("🛑 結束作業並關單", use_container_width=True):
+            if c2.button("🛑 結束作業並關單", use_container_width=True, key="close-btn"):
                 conn = get_db_connection(); conn.execute("UPDATE return_batches SET status = '已完成' WHERE batch_id = ?", (st.session_state['current_batch_id'],)); conn.commit(); conn.close()
                 st.session_state.update({'current_channel': "", 'current_batch_id': ""}); st.rerun()
 
