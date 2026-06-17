@@ -108,7 +108,6 @@ else:
                 if b_input in ["4710155282249", "4710155277528", "4710155279522", "4710155277573", "4710155282188", "4710155285653", "4710155285912", "4710155278921", "4710155282386", "4710155278860"]: st.warning("⚠️ 提醒：需退回工廠，請額外裝箱")
 
             r_type = st.radio("選擇退貨形態", ["箱出", "散出", "組出"], horizontal=True)
-            
             qty = st.number_input("輸入數量", min_value=1, step=1, value=1)
             exp_date = st.text_input("有效期限") if r_type != "箱出" else ""
             qual = st.radio("商品貨況", ["良品", "不良品"], horizontal=True) if r_type != "箱出" else "良品"
@@ -146,13 +145,14 @@ else:
                 query = "SELECT i.*, b.channel FROM return_items i LEFT JOIN return_batches b ON i.batch_id = b.batch_id WHERE 1=1"
                 params = []
                 if s_batch: query += " AND i.batch_id LIKE ?"; params.append(f"%{s_batch}%")
+                # 可在此處補充完整篩選邏輯
                 df = pd.read_sql_query(query, conn, params=params); conn.close(); st.session_state['df'] = df
 
         if 'df' in st.session_state and not st.session_state['df'].empty:
             df = st.session_state['df'].copy()
             df['建立日期'] = pd.to_datetime(df['created_at']).dt.strftime('%Y-%m-%d')
-            cols = ['建立日期', 'channel'] + [c for c in df.columns if c not in ['建立日期', 'channel', 'id', 'created_at']]
             df.rename(columns={'channel': '通路'}, inplace=True)
+            cols = ['建立日期', '通路'] + [c for c in df.columns if c not in ['建立日期', '通路', 'id', 'created_at']]
             st.dataframe(df[cols], use_container_width=True, hide_index=True)
             st.download_button("📥 下載 CSV 報表", df.to_csv(index=False).encode('utf-8-sig'), "data.csv", "text/csv")
             
@@ -163,7 +163,7 @@ else:
             elif act == "貨況轉換": n_q = st.number_input("轉換數量", step=1); n_s = st.radio("新貨況", ["良品", "不良品"])
             
             if st.button("⚠️ 送出更正申請"):
-                if act == "刪除資料" and not st.session_state.get('is_admin'): st.error("❌ 僅限管理者可刪除")
+                if act == "刪除資料" and not st.session_state.get('is_admin'): st.error("❌ 僅限管理員操作")
                 else:
                     conn = get_db_connection(); conn.execute("UPDATE return_items SET approval_status = '審核中' WHERE id = ?", (t_id,)); conn.commit(); conn.close()
                     show_alert("⚠️ 已申請成功，帶主管簽核，請先回報異常。")
