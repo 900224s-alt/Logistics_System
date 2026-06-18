@@ -57,8 +57,7 @@ if not st.session_state['logged_in']:
         if st.button("建立帳號"):
             conn = get_db_connection()
             try:
-                role = "管理者" if reg_name == ORIGINAL_ADMIN else "一般用戶"
-                conn.execute('INSERT INTO users VALUES (?, ?, ?, ?)', (reg_name, reg_pwd, get_tw_now().strftime("%Y-%m-%d %H:%M:%S"), role))
+                conn.execute('INSERT INTO users VALUES (?, ?, ?, ?)', (reg_name, reg_pwd, get_tw_now().strftime("%Y-%m-%d %H:%M:%S"), "管理者" if reg_name == ORIGINAL_ADMIN else "一般用戶"))
                 conn.commit(); st.success("註冊成功！")
             except: st.error("❌ 姓名已被註冊。")
             finally: conn.close()
@@ -68,59 +67,28 @@ else:
     tabs = st.tabs(["📦 退貨點收作業", "🔍 歷史紀錄與更正", "🔔 主管審核工作台", "👥 員工權限維護"])
 
     with tabs[0]:
-        conn = get_db_connection()
-        unfinished_tasks = conn.execute("SELECT batch_id, channel FROM return_batches WHERE status = '作業中'").fetchall()
-        conn.close()
-        if unfinished_tasks and not st.session_state.get('current_batch_id'):
-            st.subheader("⚠️ 發現未完成的作業")
-            for task in unfinished_tasks:
-                conn = get_db_connection()
-                item_count = conn.execute("SELECT COUNT(*) FROM return_items WHERE batch_id = ?", (task['batch_id'],)).fetchone()[0]
-                conn.close()
-                if st.button(f"繼續作業：:red[{task['batch_id']}] (:red[{task['channel']}]) | 已完成 {item_count} 筆"):
-                    st.session_state.update({'current_batch_id': task['batch_id'], 'current_channel': task['channel']}); st.rerun()
-
         if not st.session_state.get('current_batch_id'):
-            st.divider()
             st.subheader("🚀 請設定本次作業環境與通路")
             env = st.radio("⚙️ 作業環境", ["正式環境", "測試環境"], horizontal=True) if st.session_state.get('is_admin') else "正式環境"
             chan = st.selectbox("🏬 選擇退貨通路", ["請選擇...", "MOMO", "寶雅", "康是美", "屈臣氏", "蝦皮", "家購", "大智通", "好市多","PCHPME","松本清","唐吉訶德"])
             if st.button("鎖定並開始作業"):
                 prefix = "TEST" if env == "測試環境" else "Back"
-                today = get_tw_now().strftime("%Y%m%d")
-                conn = get_db_connection()
-                count = conn.execute("SELECT COUNT(*) FROM return_batches WHERE batch_id LIKE ?", (f"{prefix}{today}%",)).fetchone()[0]
-                bid = f"{prefix}{today}{count + 1:03d}"
-                conn.execute("INSERT INTO return_batches VALUES (?, ?, ?, '作業中')", (bid, chan, today))
-                conn.commit(); conn.close()
+                bid = prefix + get_tw_now().strftime("%Y%m%d") + "001"
+                conn = get_db_connection(); conn.execute("INSERT INTO return_batches VALUES (?, ?, ?, '作業中')", (bid, chan, get_tw_now().strftime("%Y%m%d"))); conn.commit(); conn.close()
                 st.session_state.update({'current_batch_id': bid, 'current_channel': chan}); st.rerun()
         else:
             st.info(f"🏬 通路：**{st.session_state.get('current_channel')}** ｜ 🧾 批號：**{st.session_state.get('current_batch_id')}**")
             b_input = st.text_input("🔍 請刷取商品條碼", key="barcode_field")
-            r_type = st.radio("選擇退貨形態", ["箱出", "散出", "組出"], horizontal=True)
-            
-            # 箱出隱藏效期與貨況
-            if r_type == "箱出":
-                exp_date, qual, reason = "無效期", "良品", ""
-            else:
-                exp_date = st.text_input("有效期限 (格式:20260618)")
-                qual = st.radio("商品貨況", ["良品", "不良品"], horizontal=True)
-                reason = ", ".join(st.multiselect("不良原因", DAMAGE_REASONS)) if qual == "不良品" else ""
-            
+            r_type = st.radio("退貨形態", ["箱出", "散出", "組出"], horizontal=True)
+            exp_date = st.text_input("有效期限")
             qty = st.number_input("數量", min_value=1, step=1, value=1)
+            qual = st.radio("商品貨況", ["良品", "不良品"], horizontal=True)
+            reason = ", ".join(st.multiselect("不良原因", DAMAGE_REASONS)) if qual == "不良品" else ""
             remark = st.text_input("備註欄")
-            
             if st.button("💾 儲存並繼續新增", use_container_width=True, type="primary"):
                 conn = get_db_connection()
                 conn.execute("INSERT INTO return_items (batch_id, barcode, return_type, expiry_date, quantity, quality_status, damage_reason, operator, approval_status, created_at, remark) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (st.session_state['current_batch_id'], b_input, r_type, exp_date, qty, qual, reason, st.session_state['username'], '已確認', get_tw_now().strftime("%Y-%m-%d %H:%M:%S"), remark))
-                count = conn.execute("SELECT COUNT(*) FROM return_items WHERE batch_id = ?", (st.session_state['current_batch_id'],)).fetchone()[0]
-                conn.commit(); conn.close()
-                st.session_state['last_count'] = count; st.session_state['show_success'] = True
-            
-            if st.session_state.get('show_success'):
-                st.warning(f"✅ 儲存成功！目前本單已完成：{st.session_state.get('last_count')} 筆")
-                if st.button("確認"): st.session_state['show_success'] = False; st.rerun()
-            
+                conn.commit(); conn.close(); st.success("儲存成功")
             c1, c2 = st.columns(2)
             c1.button("🔙 返回 / 暫停作業", use_container_width=True, key="back-btn", on_click=lambda: st.session_state.update({'current_channel': "", 'current_batch_id': ""}))
             c2.button("🛑 結束作業並關單", use_container_width=True, key="close-btn", on_click=lambda: (conn := get_db_connection(), conn.execute("UPDATE return_batches SET status = '已完成' WHERE batch_id = ?", (st.session_state['current_batch_id'],)), conn.commit(), conn.close(), st.session_state.update({'current_channel': "", 'current_batch_id': ""}), st.rerun()))
@@ -128,23 +96,15 @@ else:
     with tabs[1]:
         st.header("🔍 歷史紀錄與更正")
         with st.expander("⚙️ 篩選條件設定", expanded=True):
+            s_start = st.date_input("開始日期", None); s_end = st.date_input("結束日期", None)
             s_batch = st.text_input("單號 (批號)")
+            c3, c4, c5 = st.columns(3); s_barcode = c3.text_input("商品條碼"); s_operator = c4.text_input("作業員"); s_type = c5.multiselect("形態", ["箱出", "散出", "組出"])
+            c6, c7 = st.columns(2); s_channel = c6.multiselect("通路", ["MOMO", "寶雅", "康是美", "屈臣氏", "蝦皮", "家購", "大智通", "好市多","PCHPME","松本清","唐吉訶德"]); s_quality = c7.multiselect("貨況", ["良品", "不良品"])
             if st.button("查詢數據"):
                 conn = get_db_connection()
-                # 欄位順序：id, created_at, batch_id...
-                query = """SELECT id, created_at, batch_id, barcode, return_type, expiry_date, quantity, quality_status, damage_reason, operator 
-                           FROM return_items WHERE batch_id LIKE ?"""
-                df = pd.read_sql_query(query, conn)
-                # 處理日期與時間
-                df['FullDate'] = pd.to_datetime(df['created_at'])
-                df['日期'] = df['FullDate'].dt.strftime('%Y-%m-%d')
-                df['時間'] = df['FullDate'].dt.strftime('%H:%M:%S')
-                # 重新命名與排序
-                df = df.rename(columns={'id': 'ID', 'batch_id': '批號', 'barcode': '條碼', 'return_type': '形態', 'expiry_date': '效期', 'quantity': '數量', 'quality_status': '貨況', 'damage_reason': '原因', 'operator': '作業員'})
-                df = df[['選取' if '選取' in df.columns else 'dummy', '日期', '批號', 'ID', '條碼', '形態', '效期', '數量', '貨況', '原因', '作業員', '時間']]
-                df.insert(0, "選取", False); df = df.drop(columns=['dummy'], errors='ignore')
-                st.session_state['df'] = df; conn.close()
-        
+                query = "SELECT id, created_at, batch_id, barcode, return_type, expiry_date, quantity, quality_status, damage_reason, operator FROM return_items WHERE batch_id LIKE ?"
+                df = pd.read_sql_query(query, conn, params=(f"%{s_batch}%",))
+                df.insert(0, "選取", False); st.session_state['df'] = df; conn.close()
         if 'df' in st.session_state and not st.session_state['df'].empty:
             edited_df = st.data_editor(st.session_state['df'], disabled=st.session_state['df'].columns.drop("選取"), hide_index=True)
             selected = edited_df[edited_df["選取"] == True]
@@ -157,8 +117,9 @@ else:
                 conn = get_db_connection()
                 for _, row in selected.iterrows():
                     conn.execute("INSERT INTO change_requests (item_id, action, old_qty, new_qty, new_status, new_expiry, reason, status) VALUES (?, ?, ?, ?, ?, ?, ?, '審核中')", 
-                                 (int(row['ID']), act, int(row['數量']), int(n_q), n_s, n_e, n_reason if n_reason else act, "審核中"))
+                                 (int(row['id']), act, int(row['quantity']), int(n_q), n_s, n_e, n_reason if n_reason else act, "審核中"))
                 conn.commit(); conn.close(); st.warning("申請已送出")
+
     with tabs[2]:
         st.header("🔔 主管審核工作台")
         conn = get_db_connection()
