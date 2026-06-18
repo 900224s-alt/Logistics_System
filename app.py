@@ -6,11 +6,8 @@ from datetime import datetime
 # --- 莫蘭迪配色設定 --- 
 st.markdown(""" 
 <style> 
-    /* 儲存按鈕：莫蘭迪藍 */ 
     div.stButton > button[kind="primary"] { background-color: #8da3b4 !important; border: none !important; color: white !important; } 
-    /* 返回/暫停：莫蘭迪黃 */ 
     div.stButton > button#back-btn { background-color: #d4c4a8 !important; border: none !important; color: white !important; } 
-    /* 關單按鈕：莫蘭迪紅 */ 
     div.stButton > button#close-btn { background-color: #c48b8b !important; border: none !important; color: white !important; } 
 </style> 
 """, unsafe_allow_html=True) 
@@ -109,7 +106,6 @@ else:
                 conn.execute('''INSERT INTO return_items (batch_id, barcode, return_type, expiry_date, quantity, quality_status, damage_reason, operator, approval_status, created_at, remark) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''', (st.session_state['current_batch_id'], b_input, r_type, exp_date, qty, qual, reason, st.session_state['username'], '已確認', datetime.now().strftime("%Y-%m-%d %H:%M:%S"), remark)) 
                 conn.commit(); conn.close(); st.success("✅ 儲存成功！") 
             
-            # --- 新增按鈕區 ---
             c1, c2 = st.columns(2) 
             if c1.button("🔙 返回 / 暫停作業", use_container_width=True, key="back-btn"): 
                 st.session_state.update({'current_channel': "", 'current_batch_id': ""}); st.rerun() 
@@ -126,13 +122,19 @@ else:
             c6, c7 = st.columns(2); s_channel = c6.multiselect("通路", ["MOMO", "寶雅", "康是美", "屈臣氏", "蝦皮", "家購", "大智通", "好市多","PCHPME","松本清","唐吉訶德"]); s_quality = c7.multiselect("貨況", ["良品", "不良品"]) 
             if st.button("查詢數據"): 
                 conn = get_db_connection() 
-                query = "SELECT i.*, b.channel FROM return_items i LEFT JOIN return_batches b ON i.batch_id = b.batch_id WHERE i.batch_id LIKE ?" 
-                df = pd.read_sql_query(query, conn, params=(f"%{s_batch}%",)); conn.close(); st.session_state['df'] = df 
+                query = "SELECT id, created_at as 日期, b.channel as 通路, i.id as ID, i.batch_id as 退貨單號, i.barcode as 商品條碼, i.return_type as 箱散出, i.expiry_date as 效期, i.quantity as 數量, i.quality_status as 良品不良品, i.damage_reason as 異常原因, i.operator as 作業員, i.approval_status as 訂單狀態, i.created_at as 時間 FROM return_items i LEFT JOIN return_batches b ON i.batch_id = b.batch_id WHERE i.batch_id LIKE ?" 
+                df = pd.read_sql_query(query, conn, params=(f"%{s_batch}%",))
+                conn.close(); st.session_state['df'] = df 
+        
         if 'df' in st.session_state and not st.session_state['df'].empty: 
             df = st.session_state['df'].copy() 
             df.insert(0, "選取", False) 
-            edited_df = st.data_editor(df, hide_index=True) 
-            selected = edited_df[edited_df["選取"] == True] 
+            # 顯示表格 (此處 dataframe 為唯讀)
+            st.dataframe(df, hide_index=True)
+            # CSV 下載
+            st.download_button("📥 下載 CSV 報表", df.to_csv(index=False), "history.csv")
+            
+            selected = df[df["選取"] == True] 
             st.subheader("🛠️ 異常修正操作區") 
             act = st.selectbox("選擇動作", ["更正數量", "貨況轉換", "刪除資料"]) 
             n_q, n_s, res = 0, "", "" 
@@ -143,7 +145,7 @@ else:
             if st.button("⚠️ 送出更正申請"): 
                 conn = get_db_connection() 
                 for _, row in selected.iterrows(): 
-                    conn.execute("INSERT INTO change_requests (item_id, action, old_qty, new_qty, new_status, reason, status) VALUES (?, ?, ?, ?, ?, ?, '審核中')", (row['id'], act, row['quantity'], str(n_q), n_s, res)) 
+                    conn.execute("INSERT INTO change_requests (item_id, action, old_qty, new_qty, new_status, reason, status) VALUES (?, ?, ?, ?, ?, ?, '審核中')", (row['ID'], act, row['數量'], str(n_q), n_s, res)) 
                 conn.commit(); conn.close(); st.warning("✅ 申請已送出") 
 
     with tabs[2]: 
@@ -155,8 +157,13 @@ else:
             conn = get_db_connection() 
             for _, row in reviewed_df.iterrows(): 
                 if row.get("同意"): 
-                    if row['action'] == "刪除資料": conn.execute("DELETE FROM return_items WHERE id = ?", (row['item_id'],)) 
-                    elif row['action'] == "更正數量": conn.execute("UPDATE return_items SET quantity = ? WHERE id = ?", (row['new_qty'], row['item_id'])) 
+                    item = conn.execute("SELECT * FROM return_items WHERE id = ?", (row['item_id'],)).fetchone() 
+                    if item:
+                        if row['action'] == "刪除資料": conn.execute("DELETE FROM return_items WHERE id = ?", (row['item_id'],)) 
+                        elif row['action'] == "更正數量": conn.execute("UPDATE return_items SET quantity = ? WHERE id = ?", (row['new_qty'], row['item_id'])) 
+                        elif row['action'] == "貨況轉換": 
+                            conn.execute("UPDATE return_items SET quantity = ? WHERE id = ?", (item['quantity'] - int(row['new_qty']), row['item_id'])) 
+                            conn.execute("INSERT INTO return_items (batch_id, barcode, return_type, quantity, quality_status, damage_reason, operator, approval_status, created_at) VALUES (?, ?, ?, ?, ?, ?, '已確認', ?)", (item['batch_id'], item['barcode'], item['return_type'], row['new_qty'], row['new_status'], row['reason'], datetime.now().strftime("%Y-%m-%d %H:%M:%S"))) 
                     conn.execute("UPDATE change_requests SET status = '已確認' WHERE req_id = ?", (row['req_id'],)) 
             conn.commit(); conn.close(); st.rerun() 
 
