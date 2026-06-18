@@ -63,7 +63,7 @@ def get_tw_now():
  if st.button("建立帳號", use_container_width=True): 
   conn = get_db_connection() 
  try: 
- role = "管理者" if reg_name == ORIGINAL_ADMIN else "一般用戶" 
+  role = "管理者" if reg_name == ORIGINAL_ADMIN else "一般用戶" 
   conn.execute('INSERT INTO users VALUES (?, ?, ?, ?)', (reg_name, reg_pwd, get_tw_now().strftime("%Y-%m-%d %H:%M:%S"), role)) 
   conn.commit(); st.success("註冊成功！") 
  except: st.error("❌ 姓名已被註冊。") 
