@@ -196,7 +196,7 @@ else:
                         conn.execute("UPDATE change_requests SET status = '已確認' WHERE req_id = ?", (int(req['req_id']),))
                 conn.commit(); conn.close(); st.rerun()
 
-    with tabs[3]:
+   with tabs[3]:
         st.header("👥 員工權限")
         conn = get_db_connection()
         # 查詢資料
@@ -206,8 +206,12 @@ else:
         # 新增編號欄位並置於最前方
         user_df.insert(0, "編號", range(1, len(user_df) + 1))
         
+        # 使用 Styler 將所有欄位（包含表頭與資料）設定為置中
+        st_df = user_df.style.set_properties(**{'text-align': 'center'}) \
+                             .set_table_styles([{'selector': 'th', 'props': [('text-align', 'center')]}])
+        
         # 使用 hide_index=True 隱藏 Pandas 預設的索引欄，確保只顯示我們自定義的四欄
-        st.dataframe(user_df, use_container_width=True, hide_index=True)
+        st.dataframe(st_df, use_container_width=True, hide_index=True)
         
         st.divider()
         t_u = st.text_input("輸入要操作的員工名稱").strip()
