@@ -100,18 +100,38 @@ else:
             c1.button("🔙 返回 / 暫停作業", use_container_width=True, key="back-btn", on_click=lambda: st.session_state.update({'current_channel': "", 'current_batch_id': ""}))
             c2.button("🛑 結束作業並關單", use_container_width=True, key="close-btn", on_click=lambda: (conn := get_db_connection(), conn.execute("UPDATE return_batches SET status = '已完成' WHERE batch_id = ?", (st.session_state['current_batch_id'],)), conn.commit(), conn.close(), st.session_state.update({'current_channel': "", 'current_batch_id': ""}), st.rerun()))
 
-    with tabs[1]:
+   with tabs[1]:
         st.header("🔍 歷史紀錄與更正")
         with st.expander("⚙️ 篩選條件設定", expanded=True):
-            s_start = st.date_input("開始日期", None); s_end = st.date_input("結束日期", None)
+            s_start = st.date_input("開始日期", None)
+            s_end = st.date_input("結束日期", None)
             s_batch = st.text_input("單號 (批號)")
-            c3, c4, c5 = st.columns(3); s_barcode = c3.text_input("商品條碼"); s_operator = c4.text_input("作業員"); s_type = c5.multiselect("形態", ["箱出", "散出", "組出"])
-            c6, c7 = st.columns(2); s_channel = c6.multiselect("通路", ["MOMO", "寶雅", "康是美", "屈臣氏", "蝦皮", "家購", "大智通", "好市多","PCHPME","松本清","唐吉訶德"]); s_quality = c7.multiselect("貨況", ["良品", "不良品"])
+            c3, c4, c5 = st.columns(3)
+            s_barcode = c3.text_input("商品條碼")
+            s_operator = c4.text_input("作業員")
+            s_type = c5.multiselect("形態", ["箱出", "散出", "組出"])
+            c6, c7 = st.columns(2)
+            s_channel = c6.multiselect("通路", ["MOMO", "寶雅", "康是美", "屈臣氏", "蝦皮", "家購", "大智通", "好市多","PCHPME","松本清","唐吉訶德"])
+            s_quality = c7.multiselect("貨況", ["良品", "不良品"])
+            
             if st.button("查詢數據"):
                 conn = get_db_connection()
-                query = "SELECT id, created_at, batch_id, barcode, return_type, expiry_date, quantity, quality_status, damage_reason, operator FROM return_items WHERE batch_id LIKE ?"
-                df = pd.read_sql_query(query, conn, params=(f"%{s_batch}%",))
-                df.insert(0, "選取", False); st.session_state['df'] = df; conn.close()
+                # 建立基礎查詢
+                query = "SELECT id, created_at, batch_id, barcode, return_type, expiry_date, quantity, quality_status, damage_reason, operator FROM return_items WHERE 1=1"
+                params = []
+                if s_batch: query += " AND batch_id LIKE ?"; params.append(f"%{s_batch}%")
+                if s_barcode: query += " AND barcode = ?"; params.append(s_barcode)
+                if s_operator: query += " AND operator = ?"; params.append(s_operator)
+                if s_type: query += " AND return_type IN (" + ",".join(["?"]*len(s_type)) + ")"; params.extend(s_type)
+                if s_quality: query += " AND quality_status IN (" + ",".join(["?"]*len(s_quality)) + ")"; params.extend(s_quality)
+                
+                df = pd.read_sql_query(query, conn, params=params)
+                # 強制指定欄位順序
+                cols_order = ["id", "created_at", "batch_id", "barcode", "return_type", "expiry_date", "quantity", "quality_status", "damage_reason", "operator"]
+                df = df.reindex(columns=cols_order)
+                df.insert(0, "選取", False)
+                st.session_state['df'] = df
+                conn.close()
         
         if 'df' in st.session_state and not st.session_state['df'].empty:
             edited_df = st.data_editor(st.session_state['df'], disabled=st.session_state['df'].columns.drop("選取"), hide_index=True)
@@ -125,7 +145,8 @@ else:
             if st.button("⚠️ 送出申請"):
                 conn = get_db_connection()
                 for _, row in selected.iterrows():
-                    conn.execute("INSERT INTO change_requests (item_id, action, old_qty, new_qty, new_status, new_expiry, reason, status) VALUES (?, ?, ?, ?, ?, ?, ?, '審核中')", (int(row['id']), act, int(row['quantity']), int(n_q), n_s, n_e, n_reason if n_reason else act, "審核中"))
+                    conn.execute("INSERT INTO change_requests (item_id, action, old_qty, new_qty, new_status, new_expiry, reason, status) VALUES (?, ?, ?, ?, ?, ?, ?, '審核中')", 
+                                 (int(row['id']), act, int(row['quantity']), int(n_q), n_s, n_e, n_reason if n_reason else act, "審核中"))
                 conn.commit(); conn.close(); st.warning("申請已送出")
 
     with tabs[2]:
