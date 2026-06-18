@@ -149,13 +149,36 @@ else:
             elif act == "效期更正": 
                 n_e = st.text_input("新有效期限 (格式:20260618)"); n_q = st.number_input("新數量", step=1); res = st.text_input("說明原因")
             
-            if st.button("⚠️ 送出更正申請"): 
-                conn = get_db_connection() 
-                for _, row in selected.iterrows(): 
-                    conn.execute("INSERT INTO change_requests (item_id, action, old_qty, new_qty, new_status, new_expiry, reason, status) VALUES (?, ?, ?, ?, ?, ?, ?, '審核中')", 
-                                 (int(row['ID']), act, int(row['數量']), int(n_q), n_s, n_e, res)) 
-                conn.commit(); conn.close(); st.warning("✅ 申請已送出") 
-
+            # 修改後的送出更正申請邏輯
+if st.button("⚠️ 送出更正申請"):
+    conn = get_db_connection()
+    try:
+        for _, row in selected.iterrows():
+            # 確保欄位數與 VALUES 數量對齊，並處理可能為空的變數
+            query = """INSERT INTO change_requests 
+                       (item_id, action, old_qty, new_qty, new_status, new_expiry, reason, status) 
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)"""
+            
+            # 使用列表確保傳入順序正確
+            params = (
+                int(row['ID']), 
+                str(act), 
+                int(row['數量']), 
+                int(n_q), 
+                str(n_s) if n_s else "", 
+                str(n_e) if n_e else "", 
+                str(res), 
+                "審核中"
+            )
+            
+            conn.execute(query, params)
+        
+        conn.commit()
+        st.success("✅ 申請已送出")
+    except Exception as e:
+        st.error(f"寫入資料庫時發生錯誤: {e}")
+    finally:
+        conn.close()
     with tabs[2]: 
         st.header("🔔 主管審核工作台") 
         conn = get_db_connection(); review_df = pd.read_sql_query("SELECT * FROM change_requests WHERE status = '審核中'", conn); conn.close() 
