@@ -33,7 +33,7 @@ def init_db():
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("CREATE TABLE IF NOT EXISTS users (username TEXT PRIMARY KEY, password TEXT, register_date TEXT, role TEXT)")
-    # 確保 status 欄位存在
+    # 新增 status 欄位
     try: cursor.execute("ALTER TABLE users ADD COLUMN status TEXT DEFAULT 'pending'")
     except: pass
     cursor.execute("CREATE TABLE IF NOT EXISTS return_batches (batch_id TEXT PRIMARY KEY, channel TEXT, register_date TEXT, status TEXT)")
@@ -205,14 +205,23 @@ else:
     with tabs[3]:
         st.header("👥 員工權限")
         conn = get_db_connection()
+        # 查詢資料包含狀態
         user_df = pd.read_sql_query("SELECT username as 名稱, register_date as 註冊日期時間, role as 用戶別, status as 狀態 FROM users", conn)
         conn.close()
-        user_df.insert(0, "編號", range(1, len(user_df) + 1))
         
+        user_df.insert(0, "編號", range(1, len(user_df + 1)))
+        
+        # 使用 Styler 將所有欄位設定為置中
         st_df = user_df.style.set_properties(**{'text-align': 'center'}) \
                              .set_table_styles([{'selector': 'th', 'props': [('text-align', 'center')]}])
         
         st.dataframe(st_df, use_container_width=True, hide_index=True)
+        
+        # 若有待審核人員，顯示通知
+        pending_users = user_df[user_df['狀態'] == 'pending']
+        if not pending_users.empty:
+            st.warning(f"🔔 有 {len(pending_users)} 位新用戶等待審核！")
+        
         st.divider()
         t_u = st.text_input("輸入要操作的員工名稱").strip()
         c1, c2, c3, c4 = st.columns(4)
