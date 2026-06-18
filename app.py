@@ -67,8 +67,15 @@ else:
     tabs = st.tabs(["📦 退貨點收作業", "🔍 歷史紀錄與更正", "🔔 主管審核工作台", "👥 員工權限維護"])
 
     with tabs[0]:
+        # (您的點收邏輯保持不變)
         if not st.session_state.get('current_batch_id'):
             st.subheader("🚀 請設定本次作業環境與通路")
+            conn = get_db_connection()
+            unfinished = conn.execute("SELECT batch_id, channel FROM return_batches WHERE status = '作業中'").fetchall()
+            for b in unfinished:
+                count = conn.execute("SELECT COUNT(*) FROM return_items WHERE batch_id = ?", (b['batch_id'],)).fetchone()[0]
+                if st.button(f"繼續作業：{b['batch_id']} ({b['channel']}) | 已完成 {count} 筆"): st.session_state.update({'current_batch_id': b['batch_id'], 'current_channel': b['channel']}); st.rerun()
+            conn.close()
             env = st.radio("⚙️ 作業環境", ["正式環境", "測試環境"], horizontal=True) if st.session_state.get('is_admin') else "正式環境"
             chan = st.selectbox("🏬 選擇退貨通路", ["請選擇...", "MOMO", "寶雅", "康是美", "屈臣氏", "蝦皮", "家購", "大智通", "好市多","PCHPME","松本清","唐吉訶德"])
             if st.button("鎖定並開始作業"):
@@ -95,26 +102,28 @@ else:
         st.header("🔍 歷史紀錄與更正")
         with st.expander("⚙️ 篩選條件設定", expanded=True):
             c1, c2 = st.columns(2); s_start = c1.date_input("開始日期", value=None); s_end = c2.date_input("結束日期", value=None)
-            s_batch = st.text_input("單號 (批號)")
+            s_batch = st.text_input("退貨單號 (批號)")
             c3, c4, c5 = st.columns(3); s_barcode = c3.text_input("商品條碼"); s_operator = c4.text_input("作業員"); s_type = c5.multiselect("形態", ["箱出", "散出", "組出"])
             c6, c7 = st.columns(2); s_channel = c6.multiselect("通路", ["MOMO", "寶雅", "康是美", "屈臣氏", "蝦皮", "家購", "大智通", "好市多","PCHPME","松本清","唐吉訶德"]); s_quality = c7.multiselect("貨況", ["良品", "不良品"])
             if st.button("查詢數據"):
                 conn = get_db_connection()
-                df = pd.read_sql_query("SELECT id, batch_id, barcode, return_type, expiry_date, quantity, quality_status, damage_reason, operator, created_at FROM return_items WHERE batch_id LIKE ?", conn, params=(f"%{s_batch}%",))
+                df = pd.read_sql_query("SELECT id, batch_id, barcode, quantity, operator, quality_status, created_at FROM return_items WHERE batch_id LIKE ?", conn, params=(f"%{s_batch}%",))
                 df.insert(0, "選取", False); st.session_state['df'] = df; conn.close()
+        
         if 'df' in st.session_state and not st.session_state['df'].empty:
             edited_df = st.data_editor(st.session_state['df'], disabled=st.session_state['df'].columns.drop("選取"), hide_index=True)
             selected = edited_df[edited_df["選取"] == True]
-            act = st.selectbox("動作", ["更正數量", "貨況轉換", "效期更正", "刪除資料"])
-            n_q = st.number_input("數量", step=1)
-            n_e = st.text_input("新效期") if act == "效期更正" else ""
-            n_s = st.radio("新貨況", ["良品", "不良品"]) if act == "貨況轉換" else ""
-            n_reason = ", ".join(st.multiselect("不良原因", DAMAGE_REASONS)) if act == "貨況轉換" and n_s == "不良品" else ""
+            act = st.selectbox("選擇動作", ["更正數量", "貨況轉換", "效期更正", "刪除資料"])
+            n_q = st.number_input("新數量", step=1)
+            n_s = st.text_input("新貨況 (若為貨況轉換，不良品請標註原因)") if act == "貨況轉換" else ""
+            n_e = st.text_input("新效期 (效期更正用)") if act == "效期更正" else ""
+            
             if st.button("⚠️ 送出申請"):
                 conn = get_db_connection()
                 for _, row in selected.iterrows():
+                    # 這裡使用 'id' 作為鍵值來讀取，修正 KeyError
                     conn.execute("INSERT INTO change_requests (item_id, action, old_qty, new_qty, new_status, new_expiry, reason, status) VALUES (?, ?, ?, ?, ?, ?, ?, '審核中')", 
-                                 (int(row['id']), act, int(row['quantity']), int(n_q), n_s, n_e, n_reason if n_reason else act, "審核中"))
+                                 (int(row['id']), act, int(row['quantity']), int(n_q), n_s, n_e, act, "審核中"))
                 conn.commit(); conn.close(); st.warning("申請已送出")
 
     with tabs[2]:
@@ -124,28 +133,31 @@ else:
         review_df = pd.read_sql_query(query, conn)
         conn.close()
         if not review_df.empty:
-            display = review_df[['batch_id', 'barcode', 'action', 'old_qty', 'new_qty', 'new_status', 'new_expiry', 'reason', 'applicant']]
-            display.columns = ['單號', '商品條碼', '動作', '原數量', '新數量', '新狀態', '新效期', '原因', '申請人']
+            display = review_df[['batch_id', 'barcode', 'action', 'old_qty', 'new_qty', 'new_status', 'new_expiry', 'applicant']]
+            display.columns = ['單號', '商品條碼', '動作', '原數量', '新數量', '新狀態', '新效期', '申請人']
             display.insert(0, "同意", False)
             reviewed = st.data_editor(display, disabled=display.columns.drop("同意"), hide_index=True)
-            if st.button("🟢 批量處理"):
+            if st.button("🟢 批量處理同意"):
                 conn = get_db_connection()
                 for i, row in reviewed.iterrows():
                     if row["同意"]:
                         req = review_df.iloc[i]
+                        # 處理更正數量
                         if req['action'] == "更正數量": conn.execute("UPDATE return_items SET quantity = ? WHERE id = ?", (int(row['新數量']), int(req['item_id'])))
+                        # 處理效期更正
                         elif req['action'] == "效期更正": conn.execute("UPDATE return_items SET expiry_date = ?, quantity = ? WHERE id = ?", (str(req['new_expiry']), int(row['新數量']), int(req['item_id'])))
+                        # 處理貨況轉換
                         elif req['action'] == "貨況轉換":
                             conn.execute("UPDATE return_items SET quantity = quantity - ? WHERE id = ?", (int(row['新數量']), int(req['item_id'])))
                             item = conn.execute("SELECT * FROM return_items WHERE id = ?", (int(req['item_id']),)).fetchone()
-                            conn.execute("INSERT INTO return_items (batch_id, barcode, return_type, quantity, quality_status, damage_reason, operator, approval_status, created_at) VALUES (?, ?, ?, ?, ?, ?, '已確認', ?)", (item['batch_id'], item['barcode'], item['return_type'], int(row['新數量']), str(req['new_status']), str(req['reason']), item['operator'], get_tw_now().strftime("%Y-%m-%d %H:%M:%S")))
+                            conn.execute("INSERT INTO return_items (batch_id, barcode, return_type, quantity, quality_status, operator, approval_status, created_at) VALUES (?, ?, ?, ?, ?, ?, '已確認', ?)", (item['batch_id'], item['barcode'], item['return_type'], int(row['新數量']), str(req['new_status']), item['operator'], get_tw_now().strftime("%Y-%m-%d %H:%M:%S")))
                         conn.execute("UPDATE change_requests SET status = '已確認' WHERE req_id = ?", (int(req['req_id']),))
-                conn.commit(); conn.close(); st.success("處理完成"); st.rerun()
+                conn.commit(); conn.close(); st.success("完成"); st.rerun()
 
     with tabs[3]:
         st.header("👥 員工權限")
         conn = get_db_connection(); st.dataframe(pd.read_sql_query("SELECT * FROM users", conn), use_container_width=True); conn.close()
-        t_u = st.text_input("姓名").strip()
+        t_u = st.text_input("操作員工姓名").strip()
         c1, c2, c3 = st.columns(3)
         if c1.button("🎖️ 升職"): conn = get_db_connection(); conn.execute("UPDATE users SET role = '管理者' WHERE username = ?", (t_u,)); conn.commit(); conn.close(); st.rerun()
         if c2.button("👤 降職"): conn = get_db_connection(); conn.execute("UPDATE users SET role = '一般用戶' WHERE username = ?", (t_u,)); conn.commit(); conn.close(); st.rerun()
