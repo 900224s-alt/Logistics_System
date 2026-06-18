@@ -6,7 +6,6 @@ from datetime import datetime, timedelta
 def get_tw_now():
     return datetime.utcnow() + timedelta(hours=8)
 
-# 定義通路與對應代碼
 CHANNEL_CODES = {
     "MOMO": "MOMO", "寶雅": "POYA", "康是美": "COSMED", "屈臣氏": "WATSONS", 
     "蝦皮": "SHOPEE", "家購": "JIAGO", "大智通": "DZT", "好市多": "COSTCO", 
@@ -70,8 +69,11 @@ if not st.session_state['logged_in']:
             except: st.error("❌ 姓名已被註冊。")
             finally: conn.close()
 else:
+    # 顯示身份與登出
     st.sidebar.write(f"👤 作業員：**{st.session_state['username']}**")
+    st.sidebar.write(f"👑 職位：**{'管理者' if st.session_state.get('is_admin') else '一般用戶'}**")
     if st.sidebar.button("登出系統"): st.session_state.clear(); st.rerun()
+    
     tabs = st.tabs(["📦 退貨點收作業", "🔍 歷史紀錄查詢與異常修正", "🔔 主管審核工作台", "👥 員工權限維護"])
 
     with tabs[0]:
@@ -94,7 +96,6 @@ else:
                 code = CHANNEL_CODES[chan]
                 today = get_tw_now().strftime("%Y%m%d")
                 conn = get_db_connection()
-                # 統計該通路當日單號數量
                 count = conn.execute("SELECT COUNT(*) FROM return_batches WHERE batch_id LIKE ?", (f"{prefix}{code}_{today}%",)).fetchone()[0]
                 bid = f"{prefix}{code}_{today}_{count + 1:03d}"
                 conn.execute("INSERT INTO return_batches VALUES (?, ?, ?, '作業中')", (bid, chan, today))
@@ -138,12 +139,13 @@ else:
             
             if st.button("查詢"):
                 conn = get_db_connection()
-                # 若為管理者可切換環境，一般用戶強制正式環境
-                env_prefix = "T-%" if (st.session_state.get('is_admin') and env_filter == "測試") else ("%" if not st.session_state.get('is_admin') else "[A-Z]%")
-                if not st.session_state.get('is_admin'): env_prefix = "%" # 排除測試字元開頭
+                env_prefix = "%"
+                if st.session_state.get('is_admin'):
+                    if env_filter == "正式": env_prefix = "[A-Z]%"
+                    elif env_filter == "測試": env_prefix = "T-%"
+                else: env_prefix = "[A-Z]%"
                 
                 query = "SELECT i.id, i.created_at, b.channel, i.batch_id, i.barcode, i.return_type, i.expiry_date, i.quantity, i.quality_status, i.damage_reason, i.operator FROM return_items i LEFT JOIN return_batches b ON i.batch_id = b.batch_id WHERE i.batch_id LIKE ? AND i.batch_id LIKE ?"
-                # 簡單篩選，實際複雜篩選需配合 SQL 參數擴充
                 df = pd.read_sql_query(query, conn, params=(f"%{s_batch}%", env_prefix))
                 df['FullDate'] = pd.to_datetime(df['created_at'])
                 df['日期'] = df['FullDate'].dt.strftime('%Y-%m-%d')
@@ -154,6 +156,8 @@ else:
         
         if 'df' in st.session_state and not st.session_state['df'].empty:
             edited_df = st.data_editor(st.session_state['df'], disabled=st.session_state['df'].columns.drop("選取"), hide_index=True)
+            csv = edited_df.to_csv(index=False).encode('utf-8-sig')
+            st.download_button("📥 下載 CSV", csv, "history.csv", "text/csv")
             selected = edited_df[edited_df["選取"] == True]
             act = st.selectbox("動作", ["數量更正", "貨況更正", "效期更正", "刪除資料"])
             n_q = st.number_input("新數量", step=1)
@@ -191,6 +195,10 @@ else:
                         elif req['action'] == "效期更正": conn.execute("UPDATE return_items SET expiry_date = ?, quantity = ? WHERE id = ?", (str(row['新效期']), int(row['新數量']), int(req['item_id'])))
                         conn.execute("UPDATE change_requests SET status = '已確認' WHERE req_id = ?", (int(req['req_id']),))
                 conn.commit(); conn.close(); st.rerun()
+
+    with tabs[3]:
+        st.header("👥 員工權限")
+        conn = get_db_connection(); st.dataframe(pd.read_sql_query("SELECT * FROM users", conn), use_container_width=True); conn.close()
     with tabs[3]:
         st.header("👥 員工權限")
         conn = get_db_connection(); st.dataframe(pd.read_sql_query("SELECT * FROM users", conn), use_container_width=True); conn.close()
