@@ -12,6 +12,26 @@ CHANNEL_CODES = {
     "PCHPME": "PCHOME", "松本清": "MATSUKIYO", "唐吉訶德": "DONKI"
 }
 
+# --- 條碼提醒需求 ---
+BARCODE_ALERTS = {
+    "4710155288739": ["勿拆成單品單件"],
+    "4710155287558": ["勿拆成單品單件"],
+    "4710155284779": ["請額外裝箱並貼上大字報（好壞品分開放）"],
+    "4710155285837": ["請額外裝箱並貼上大字報（好壞品分開放）"],
+    "4710155281877": ["請額外裝箱並貼上大字報（好壞品分開放）"],
+    "4710155274527": ["請額外裝箱並貼上大字報（好壞品分開放）"],
+    "4710155282249": ["需退回工廠商品，請額外裝箱並貼上大字報（好壞品分開放）"],
+    "4710155277528": ["需退回工廠商品，請額外裝箱並貼上大字報（好壞品分開放）"],
+    "4710155279522": ["需退回工廠商品，請額外裝箱並貼上大字報（好壞品分開放）"],
+    "4710155277573": ["需退回工廠商品，請額外裝箱並貼上大字報（好壞品分開放）"],
+    "4710155282188": ["需退回工廠商品，請額外裝箱並貼上大字報（好壞品分開放）"],
+    "4710155285653": ["需退回工廠商品，請額外裝箱並貼上大字報（好壞品分開放）"],
+    "4710155285912": ["需退回工廠商品，請額外裝箱並貼上大字報（好壞品分開放）"],
+    "4710155278921": ["需退回工廠商品，請額外裝箱並貼上大字報（好壞品分開放）"],
+    "4710155282386": ["需退回工廠商品，請額外裝箱並貼上大字報（好壞品分開放）"],
+    "4710155278860": ["需退回工廠商品，請額外裝箱並貼上大字報（好壞品分開放）"]
+}
+
 # --- 莫蘭迪配色設定 ---
 st.markdown("""
 <style>
@@ -81,13 +101,11 @@ else:
     st.sidebar.write(f"👑 職位：**{'管理者' if st.session_state.get('is_admin') else '一般用戶'}**")
     if st.sidebar.button("登出系統"): st.session_state.clear(); st.rerun()
     
-    # 檢查是否有待審核異常與待審核用戶
     conn = get_db_connection()
     pending_req_count = conn.execute("SELECT COUNT(*) FROM change_requests WHERE status = '審核中'").fetchone()[0]
     pending_user_count = conn.execute("SELECT COUNT(*) FROM users WHERE status = 'pending'").fetchone()[0]
     conn.close()
 
-    # 動態產生 Tabs
     tab_labels = ["📦 退貨點收作業", "🔍 歷史紀錄查詢與異常修正"]
     if st.session_state.get('is_admin'):
         review_label = f"🔔 主管審核工作台 ({pending_req_count})" if pending_req_count > 0 else "🔔 主管審核工作台"
@@ -133,12 +151,19 @@ else:
                 reason = ", ".join(st.multiselect("不良原因", DAMAGE_REASONS)) if qual == "不良品" else ""
             qty = st.number_input("數量", min_value=1, step=1, value=1)
             remark = st.text_input("備註欄")
+            
             if st.button("💾 儲存並繼續新增", use_container_width=True, type="primary"):
+                # --- 新增條碼檢查邏輯 ---
+                if b_input in BARCODE_ALERTS:
+                    for alert in BARCODE_ALERTS[b_input]:
+                        st.warning(f"⚠️ 條碼 {b_input} 提醒：{alert}")
+                
                 conn = get_db_connection()
                 conn.execute("INSERT INTO return_items (batch_id, barcode, return_type, expiry_date, quantity, quality_status, damage_reason, operator, approval_status, created_at, remark) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (st.session_state['current_batch_id'], b_input, r_type, exp_date, qty, qual, reason, st.session_state['username'], '已確認', get_tw_now().strftime("%Y-%m-%d %H:%M:%S"), remark))
                 count = conn.execute("SELECT COUNT(*) FROM return_items WHERE batch_id = ?", (st.session_state['current_batch_id'],)).fetchone()[0]
                 conn.commit(); conn.close()
                 st.session_state['last_count'] = count; st.session_state['show_success'] = True
+            
             if st.session_state.get('show_success'):
                 st.warning(f"✅ 儲存成功！目前本單已完成：{st.session_state.get('last_count')} 筆")
                 if st.button("確認"): st.session_state['show_success'] = False; st.rerun()
@@ -225,10 +250,8 @@ else:
             user_df.insert(0, "編號", range(1, len(user_df) + 1))
             st_df = user_df.style.set_properties(**{'text-align': 'center'}).set_table_styles([{'selector': 'th', 'props': [('text-align', 'center')]}])
             st.dataframe(st_df, use_container_width=True, hide_index=True)
-            
             pending_users = user_df[user_df['狀態'] == 'pending']
             if not pending_users.empty: st.warning(f"🔔 有 {len(pending_users)} 位新用戶等待審核！")
-            
             st.divider()
             t_u = st.text_input("輸入要操作的員工名稱").strip()
             c1, c2, c3, c4 = st.columns(4)
