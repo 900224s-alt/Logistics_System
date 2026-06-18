@@ -117,51 +117,45 @@ else:
                 conn = get_db_connection(); conn.execute("UPDATE return_batches SET status = '已完成' WHERE batch_id = ?", (st.session_state['current_batch_id'],)); conn.commit(); conn.close() 
                 st.session_state.update({'current_channel': "", 'current_batch_id': ""}); st.rerun() 
 
-    with tabs[1]: 
+with tabs[1]: 
         st.header("🔍 歷史紀錄與更正") 
         with st.expander("⚙️ 篩選條件設定", expanded=True): 
+            c1, c2 = st.columns(2); s_start = c1.date_input("開始日期", value=None); s_end = c2.date_input("結束日期", value=None) 
             s_batch = st.text_input("退貨單號 (批號)") 
+            c3, c4, c5 = st.columns(3); s_barcode = c3.text_input("商品條碼"); s_operator = c4.text_input("作業員"); s_type = c5.multiselect("形態", ["箱出", "散出", "組出"]) 
+            c6, c7 = st.columns(2); s_channel = c6.multiselect("通路", ["MOMO", "寶雅", "康是美", "屈臣氏", "蝦皮", "家購", "大智通", "好市多","PCHPME","松本清","唐吉訶德"]); s_quality = c7.multiselect("貨況", ["良品", "不良品"]) 
             if st.button("查詢數據"): 
                 conn = get_db_connection() 
                 query = "SELECT i.*, b.channel FROM return_items i LEFT JOIN return_batches b ON i.batch_id = b.batch_id WHERE i.batch_id LIKE ?" 
                 df = pd.read_sql_query(query, conn, params=(f"%{s_batch}%",))
                 df['日期'] = pd.to_datetime(df['created_at']).dt.strftime('%Y-%m-%d')
                 df.insert(0, "選取", False)
+                # 指定欄位順序
                 df = df[['選取', '日期', 'channel', 'id', 'batch_id', 'barcode', 'return_type', 'expiry_date', 'quantity', 'quality_status', 'damage_reason', 'operator', 'approval_status', 'created_at']]
                 df.columns = ["選取", "日期", "通路", "ID", "退貨單號", "商品條碼", "箱散出", "效期", "數量", "良品不良品", "異常原因", "作業員", "訂單狀態", "時間"]
                 conn.close(); st.session_state['df'] = df 
         
         if 'df' in st.session_state and not st.session_state['df'].empty: 
-            # 【關鍵修改】使用 column_config 鎖定所有欄位，只開放「選取」欄位
+            # --- 唯一修正點：鎖定唯讀，只開放「選取」 ---
             column_config = {col: st.column_config.Column(disabled=True) for col in st.session_state['df'].columns}
             column_config["選取"] = st.column_config.CheckboxColumn(disabled=False)
             
-            edited_df = st.data_editor(
-                st.session_state['df'], 
-                column_config=column_config, 
-                use_container_width=True, 
-                hide_index=True
-            )
-            
+            edited_df = st.data_editor(st.session_state['df'], column_config=column_config, hide_index=True) 
             st.download_button("📥 下載 CSV 報表", edited_df.to_csv(index=False), "history.csv")
             
-            # 從編輯後的表格中取得有打勾的行
-            selected = edited_df[edited_df["選取"] == True]
-            
+            selected = edited_df[edited_df["選取"] == True] 
             st.subheader("🛠️ 異常修正操作區") 
-            if not selected.empty:
-                act = st.selectbox("選擇動作", ["更正數量", "貨況轉換", "刪除資料"]) 
-                n_q, n_s, res = 0, "", "" 
-                if act == "更正數量": n_q = st.number_input("新數量", step=1); res = st.text_input("說明原因") 
-                elif act == "貨況轉換": 
-                    n_q = st.number_input("轉換數量", step=1); n_s = st.radio("新貨況", ["良品", "不良品"]) 
-                    if n_s == "不良品": res = ", ".join(st.multiselect("勾選不良原因", DAMAGE_REASONS)) 
-                
-                if st.button("⚠️ 送出更正申請"): 
-                    conn = get_db_connection() 
-                    for _, row in selected.iterrows(): 
-                        conn.execute("INSERT INTO change_requests (item_id, action, old_qty, new_qty, new_status, reason, status) VALUES (?, ?, ?, ?, ?, ?, '審核中')", (row['ID'], act, row['數量'], str(n_q), n_s, res)) 
-                    conn.commit(); conn.close(); st.warning("✅ 申請已送出") 
+            act = st.selectbox("選擇動作", ["更正數量", "貨況轉換", "刪除資料"]) 
+            n_q, n_s, res = 0, "", "" 
+            if act == "更正數量": n_q = st.number_input("新數量", step=1); res = st.text_input("說明原因") 
+            elif act == "貨況轉換": 
+                n_q = st.number_input("轉換數量", step=1); n_s = st.radio("新貨況", ["良品", "不良品"]) 
+                if n_s == "不良品": res = ", ".join(st.multiselect("勾選不良原因", DAMAGE_REASONS)) 
+            if st.button("⚠️ 送出更正申請"): 
+                conn = get_db_connection() 
+                for _, row in selected.iterrows(): 
+                    conn.execute("INSERT INTO change_requests (item_id, action, old_qty, new_qty, new_status, reason, status) VALUES (?, ?, ?, ?, ?, ?, '審核中')", (row['ID'], act, row['數量'], str(n_q), n_s, res)) 
+                conn.commit(); conn.close(); st.warning("✅ 申請已送出")
             else:
                 st.info("請勾選上方表格中的資料以進行操作")
     with tabs[2]: 
