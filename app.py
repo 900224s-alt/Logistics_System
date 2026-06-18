@@ -55,14 +55,22 @@ if not st.session_state['logged_in']:
         login_pwd = st.text_input("請輸入密碼", type="password", key="login_pwd")
         if st.button("進入系統"):
             conn = get_db_connection()
-            user = conn.execute('SELECT * FROM users WHERE username = ? AND password = ?', (login_name, login_pwd)).fetchone()
-            conn.close()
+            user = conn.execute('SELECT * FROM users WHERE username = ?', (login_name,)).fetchone()
+            
             if user:
-                if user['status'] == 'approved':
-                    st.session_state.update({'logged_in': True, 'username': login_name, 'is_admin': (user['role'] == "管理者" or login_name == ORIGINAL_ADMIN)})
-                    st.rerun()
+                # 帳號存在，檢查密碼與狀態
+                if user['password'] == login_pwd:
+                    if user['status'] == 'approved':
+                        st.session_state.update({'logged_in': True, 'username': login_name, 'is_admin': (user['role'] == "管理者" or login_name == ORIGINAL_ADMIN)})
+                        st.rerun()
+                    else:
+                        st.error("❌ 您的帳號尚未通過管理員審核，請稍候。")
                 else:
-                    st.error("❌ 帳號尚未通過管理員審核，請稍候。")
+                    st.error("❌ 密碼錯誤，請重新輸入。")
+            else:
+                # 帳號不存在
+                st.error("❌ 查無此帳號，請確認姓名或前往註冊。")
+            conn.close()
     with tab2:
         reg_name = st.text_input("請輸入你的中文真實姓名", key="reg_name").strip()
         reg_pwd = st.text_input("自訂密碼", type="password", key="reg_pwd")
