@@ -50,7 +50,7 @@ st.title("📦 物流退貨點收系統")
 
 if not st.session_state['logged_in']:
     tab1, tab2 = st.tabs(["👤 帳號登入", "📝 新用戶註冊"])
-   with tab1:
+with tab1:
         login_name = st.text_input("請輸入中文真實姓名", key="login_name").strip()
         login_pwd = st.text_input("請輸入密碼", type="password", key="login_pwd")
         if st.button("進入系統"):
