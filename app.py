@@ -196,7 +196,7 @@ else:
                         conn.execute("UPDATE change_requests SET status = '已確認' WHERE req_id = ?", (int(req['req_id']),))
                 conn.commit(); conn.close(); st.rerun()
 
-   with tabs[3]:
+with tabs[3]:
         st.header("👥 員工權限")
         conn = get_db_connection()
         user_df = pd.read_sql_query("SELECT username as 名稱, register_date as 註冊日期時間, role as 用戶別 FROM users", conn)
