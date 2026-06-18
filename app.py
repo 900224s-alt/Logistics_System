@@ -117,7 +117,7 @@ else:
                 conn = get_db_connection(); conn.execute("UPDATE return_batches SET status = '已完成' WHERE batch_id = ?", (st.session_state['current_batch_id'],)); conn.commit(); conn.close() 
                 st.session_state.update({'current_channel': "", 'current_batch_id': ""}); st.rerun() 
 
-with tabs[1]: 
+    with tabs[1]: 
         st.header("🔍 歷史紀錄與更正") 
         with st.expander("⚙️ 篩選條件設定", expanded=True): 
             c1, c2 = st.columns(2); s_start = c1.date_input("開始日期", value=None); s_end = c2.date_input("結束日期", value=None) 
@@ -130,17 +130,17 @@ with tabs[1]:
                 df = pd.read_sql_query(query, conn, params=(f"%{s_batch}%",))
                 df['日期'] = pd.to_datetime(df['created_at']).dt.strftime('%Y-%m-%d')
                 df.insert(0, "選取", False)
-                # 指定欄位順序
+                # 重新排列為 14 欄: 選取, 日期, 通路, ID, 退貨單號, 商品條碼, 箱散出, 效期, 數量, 良品不良品, 異常原因, 作業員, 訂單狀態, 時間
                 df = df[['選取', '日期', 'channel', 'id', 'batch_id', 'barcode', 'return_type', 'expiry_date', 'quantity', 'quality_status', 'damage_reason', 'operator', 'approval_status', 'created_at']]
                 df.columns = ["選取", "日期", "通路", "ID", "退貨單號", "商品條碼", "箱散出", "效期", "數量", "良品不良品", "異常原因", "作業員", "訂單狀態", "時間"]
                 conn.close(); st.session_state['df'] = df 
         
         if 'df' in st.session_state and not st.session_state['df'].empty: 
-            # --- 唯一修正點：鎖定唯讀，只開放「選取」 ---
+            # 鎖定唯讀，僅開放選取方塊
             column_config = {col: st.column_config.Column(disabled=True) for col in st.session_state['df'].columns}
             column_config["選取"] = st.column_config.CheckboxColumn(disabled=False)
-            
             edited_df = st.data_editor(st.session_state['df'], column_config=column_config, hide_index=True) 
+            
             st.download_button("📥 下載 CSV 報表", edited_df.to_csv(index=False), "history.csv")
             
             selected = edited_df[edited_df["選取"] == True] 
@@ -155,8 +155,8 @@ with tabs[1]:
                 conn = get_db_connection() 
                 for _, row in selected.iterrows(): 
                     conn.execute("INSERT INTO change_requests (item_id, action, old_qty, new_qty, new_status, reason, status) VALUES (?, ?, ?, ?, ?, ?, '審核中')", (row['ID'], act, row['數量'], str(n_q), n_s, res)) 
-                conn.commit(); conn.close(); st.warning("✅ 申請已送出")
-         
+                conn.commit(); conn.close(); st.warning("✅ 申請已送出") 
+
     with tabs[2]: 
         st.header("🔔 主管審核工作台") 
         conn = get_db_connection(); review_df = pd.read_sql_query("SELECT * FROM change_requests WHERE status = '審核中'", conn); conn.close() 
