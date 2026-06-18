@@ -137,11 +137,32 @@ else:
             n_q = st.number_input("新數量", step=1)
             n_s = st.text_input("新貨況 (貨況轉換用)") if act == "貨況轉換" else ""
             n_e = st.text_input("新效期 (效期更正用)") if act == "效期更正" else ""
-            if st.button("⚠️ 送出更正申請"):
+           if st.button("⚠️ 送出更正申請"):
                 conn = get_db_connection()
-                for _, row in selected.iterrows():
-                    conn.execute("INSERT INTO change_requests (item_id, action, old_qty, new_qty, new_status, new_expiry, reason, status) VALUES (?, ?, ?, ?, ?, ?, ?, '審核中')", (int(row['ID']), act, int(row['數量']), int(n_q), n_s, n_e, act, "審核中"))
-                conn.commit(); conn.close(); st.warning("✅ 申請已送出")
+                try:
+                    for _, row in selected.iterrows():
+                        # 使用 8 個問號，完全對應下方 params 中的 8 個參數
+                        sql = """INSERT INTO change_requests 
+                                 (item_id, action, old_qty, new_qty, new_status, new_expiry, reason, status) 
+                                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)"""
+                        
+                        params = (
+                            int(row['ID']), 
+                            str(act), 
+                            int(row['數量']), 
+                            int(n_q), 
+                            str(n_s) if act == "貨況轉換" else "", 
+                            str(n_e) if act == "效期更正" else "", 
+                            str(act), # 這裡對應 reason 欄位
+                            "審核中"  # 這裡對應 status 欄位
+                        )
+                        conn.execute(sql, params)
+                    conn.commit()
+                    st.warning("✅ 申請已送出")
+                except Exception as e:
+                    st.error(f"寫入申請失敗: {e}")
+                finally:
+                    conn.close()
 
     with tabs[2]:
         st.header("🔔 主管審核工作台")
