@@ -93,7 +93,7 @@ else:
             c1.button("🔙 返回 / 暫停作業", use_container_width=True, key="back-btn", on_click=lambda: st.session_state.update({'current_channel': "", 'current_batch_id': ""}))
             c2.button("🛑 結束作業並關單", use_container_width=True, key="close-btn", on_click=lambda: (conn := get_db_connection(), conn.execute("UPDATE return_batches SET status = '已完成' WHERE batch_id = ?", (st.session_state['current_batch_id'],)), conn.commit(), conn.close(), st.session_state.update({'current_channel': "", 'current_batch_id': ""}), st.rerun()))
 
-    with tabs[1]:
+with tabs[1]:
         st.header("🔍 歷史紀錄與更正")
         with st.expander("⚙️ 篩選條件設定", expanded=True):
             s_start = st.date_input("開始日期", None); s_end = st.date_input("結束日期", None)
@@ -102,9 +102,27 @@ else:
             c6, c7 = st.columns(2); s_channel = c6.multiselect("通路", ["MOMO", "寶雅", "康是美", "屈臣氏", "蝦皮", "家購", "大智通", "好市多","PCHPME","松本清","唐吉訶德"]); s_quality = c7.multiselect("貨況", ["良品", "不良品"])
             if st.button("查詢數據"):
                 conn = get_db_connection()
-                query = "SELECT id, created_at, batch_id, barcode, return_type, expiry_date, quantity, quality_status, damage_reason, operator FROM return_items WHERE batch_id LIKE ?"
+                # 調整 SQL 順序，加入通路 (b.channel)
+                query = """SELECT i.id, i.created_at, b.channel, i.batch_id, i.barcode, i.return_type, i.expiry_date, i.quantity, i.quality_status, i.damage_reason, i.operator 
+                           FROM return_items i LEFT JOIN return_batches b ON i.batch_id = b.batch_id 
+                           WHERE i.batch_id LIKE ?"""
                 df = pd.read_sql_query(query, conn, params=(f"%{s_batch}%",))
-                df.insert(0, "選取", False); st.session_state['df'] = df; conn.close()
+                
+                # 重新命名欄位以符合您的表格順序要求
+                df = df.rename(columns={
+                    'id': 'ID', 'created_at': '日期', 'channel': '通路', 'batch_id': '批號', 
+                    'barcode': '條碼', 'return_type': '形態', 'expiry_date': '效期', 
+                    'quantity': '數量', 'quality_status': '貨況', 'damage_reason': '原因', 'operator': '作業員'
+                })
+                # 確保日期格式化
+                df['日期'] = pd.to_datetime(df['日期']).dt.strftime('%Y-%m-%d')
+                # 強制指定欄位順序：日期與通路緊接在選取之後
+                cols = ['日期', '通路', 'ID', '批號', '條碼', '形態', '效期', '數量', '貨況', '原因', '作業員']
+                df = df[cols]
+                df.insert(0, "選取", False)
+                st.session_state['df'] = df
+                conn.close()
+        
         if 'df' in st.session_state and not st.session_state['df'].empty:
             edited_df = st.data_editor(st.session_state['df'], disabled=st.session_state['df'].columns.drop("選取"), hide_index=True)
             selected = edited_df[edited_df["選取"] == True]
@@ -113,13 +131,13 @@ else:
             n_s = st.radio("新貨況", ["良品", "不良品"], horizontal=True) if act == "貨況轉換" else ""
             n_reason = ", ".join(st.multiselect("不良原因", DAMAGE_REASONS)) if act == "貨況轉換" and n_s == "不良品" else ""
             n_e = st.text_input("新效期") if act == "效期更正" else ""
+            
             if st.button("⚠️ 送出申請"):
                 conn = get_db_connection()
                 for _, row in selected.iterrows():
                     conn.execute("INSERT INTO change_requests (item_id, action, old_qty, new_qty, new_status, new_expiry, reason, status) VALUES (?, ?, ?, ?, ?, ?, ?, '審核中')", 
-                                 (int(row['id']), act, int(row['quantity']), int(n_q), n_s, n_e, n_reason if n_reason else act, "審核中"))
+                                 (int(row['ID']), act, int(row['數量']), int(n_q), n_s, n_e, n_reason if n_reason else act, "審核中"))
                 conn.commit(); conn.close(); st.warning("申請已送出")
-
     with tabs[2]:
         st.header("🔔 主管審核工作台")
         conn = get_db_connection()
