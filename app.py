@@ -69,8 +69,8 @@ def get_tw_now():
  except: st.error("❌ 姓名已被註冊。") 
  finally: conn.close() 
  else:
-     st.sidebar.write(f"👤 作業員：**{st.session_state['username']}**")
-     st.sidebar.write(f"🎖️ 權限：**{'管理者' if st.session_state.get('is_admin') else '一般用戶'}**")
+  st.sidebar.write(f"👤 作業員：**{st.session_state['username']}**")
+  st.sidebar.write(f"🎖️ 權限：**{'管理者' if st.session_state.get('is_admin') else '一般用戶'}**")
 
     if st.sidebar.button("登出系統"):
         st.session_state.clear()
