@@ -151,13 +151,33 @@ else:
             elif act == "效期更正": 
                 n_e = st.text_input("新有效期限 (格式:20260618)"); n_q = st.number_input("新數量", step=1); res = st.text_input("說明原因")
             
-            if st.button("⚠️ 送出更正申請"): 
-                conn = get_db_connection() 
-                for _, row in selected.iterrows(): 
-                    conn.execute("""INSERT INTO change_requests (item_id, action, old_qty, new_qty, new_status, new_expiry, reason, status) 
-                                    VALUES (?, ?, ?, ?, ?, ?, ?, '審核中')""", 
-                                 (int(row['ID']), act, int(row['數量']), int(n_q), n_s, n_e, res)) 
-                conn.commit(); conn.close(); st.warning("✅ 申請已送出") 
+            if selected.empty:
+    st.warning("請先勾選要更正的資料")
+    st.stop()
+
+if st.button("⚠️ 送出更正申請"):
+    conn = get_db_connection()
+
+    for _, row in selected.iterrows():
+        conn.execute("""
+        INSERT INTO change_requests 
+        (item_id, action, old_qty, new_qty, new_status, new_expiry, reason, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            int(float(row['ID'])),
+            act,
+            int(float(row['數量'])),
+            int(n_q),
+            n_s,
+            n_e,
+            res,
+            "審核中"
+        ))
+
+    conn.commit()
+    conn.close()
+    st.warning("✅ 申請已送出")
 
     with tabs[2]: 
         st.header("🔔 主管審核工作台") 
