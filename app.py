@@ -198,31 +198,18 @@ else:
 
     with tabs[3]:
         st.header("👥 員工權限")
-        
-        # 僅選取需要的欄位顯示，排除密碼
         conn = get_db_connection()
         user_df = pd.read_sql_query("SELECT username as 名稱, register_date as 註冊日期時間, role as 用戶別 FROM users", conn)
         conn.close()
-        
-        # 增加一個自動生成的編號欄位
         user_df.insert(0, "編號", range(1, len(user_df) + 1))
-        st.dataframe(user_df, use_container_width=True)
-        
+        user_df = user_df.set_index("編號")
+        st.dataframe(user_df, use_container_width=True, hide_index=True)
         st.divider()
         t_u = st.text_input("輸入要操作的員工名稱").strip()
         c1, c2, c3 = st.columns(3)
-        
         if c1.button("🎖️ 調整為管理者"): 
-            conn = get_db_connection()
-            conn.execute("UPDATE users SET role = '管理者' WHERE username = ?", (t_u,))
-            conn.commit(); conn.close(); st.rerun()
-            
+            conn = get_db_connection(); conn.execute("UPDATE users SET role = '管理者' WHERE username = ?", (t_u,)); conn.commit(); conn.close(); st.rerun()
         if c2.button("👤 調整為一般用戶"): 
-            conn = get_db_connection()
-            conn.execute("UPDATE users SET role = '一般用戶' WHERE username = ?", (t_u,))
-            conn.commit(); conn.close(); st.rerun()
-            
+            conn = get_db_connection(); conn.execute("UPDATE users SET role = '一般用戶' WHERE username = ?", (t_u,)); conn.commit(); conn.close(); st.rerun()
         if c3.button("❌ 刪除（離職夥伴）"): 
-            conn = get_db_connection()
-            conn.execute("DELETE FROM users WHERE username = ?", (t_u,))
-            conn.commit(); conn.close(); st.rerun()
+            conn = get_db_connection(); conn.execute("DELETE FROM users WHERE username = ?", (t_u,)); conn.commit(); conn.close(); st.rerun()
