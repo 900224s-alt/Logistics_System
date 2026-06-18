@@ -58,8 +58,8 @@ def get_tw_now():
   st.session_state.update({'logged_in': True, 'username': login_name, 'is_admin': (user['role'] == "管理者" or login_name == ORIGINAL_ADMIN)}) 
   st.rerun() 
  with tab2: 
- reg_name = st.text_input("請輸入你的中文真實姓名", key="reg_name").strip() 
- reg_pwd = st.text_input("自訂密碼", type="password", key="reg_pwd") 
+  reg_name = st.text_input("請輸入你的中文真實姓名", key="reg_name").strip() 
+  reg_pwd = st.text_input("自訂密碼", type="password", key="reg_pwd") 
  if st.button("建立帳號", use_container_width=True): 
   conn = get_db_connection() 
  try: 
