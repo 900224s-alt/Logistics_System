@@ -156,9 +156,30 @@ else:
                     st.warning("請先勾選要更正的資料") 
                 else: 
                     conn = get_db_connection() 
-                    for _, row in selected.iterrows(): 
-                        conn.execute("INSERT INTO change_requests (item_id, action, old_qty, new_qty, new_status, new_expiry, reason, status) VALUES (?, ?, ?, ?, ?, ?, ?, '審核中')", (int(float(row['ID'])), act, int(float(row['數量'])), int(n_q), n_s, n_e, res)) 
-                    conn.commit(); conn.close(); st.warning("✅ 申請已送出") 
+                    try:
+                        for _, row in selected.iterrows(): 
+                            # 嚴格對應 8 個欄位與 8 個參數
+                            sql = """INSERT INTO change_requests 
+                                     (item_id, action, old_qty, new_qty, new_status, new_expiry, reason, status) 
+                                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)"""
+                            
+                            params = (
+                                int(float(row['ID'])), 
+                                str(act), 
+                                int(float(row['數量'])), 
+                                int(n_q), 
+                                str(n_s), 
+                                str(n_e), 
+                                str(res), 
+                                "審核中" # 將 '審核中' 也納入 params，使用 ? 佔位
+                            )
+                            conn.execute(sql, params)
+                        conn.commit()
+                        st.warning("✅ 申請已送出")
+                    except Exception as e:
+                        st.error(f"寫入申請失敗: {e}")
+                    finally:
+                        conn.close()
 
     with tabs[2]: 
         st.header("🔔 主管審核工作台") 
