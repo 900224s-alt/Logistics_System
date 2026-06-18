@@ -35,6 +35,7 @@ def init_db():
     cursor.execute("CREATE TABLE IF NOT EXISTS users (username TEXT PRIMARY KEY, password TEXT, register_date TEXT, role TEXT)") 
     cursor.execute("CREATE TABLE IF NOT EXISTS return_batches (batch_id TEXT PRIMARY KEY, channel TEXT, register_date TEXT, status TEXT)") 
     cursor.execute("CREATE TABLE IF NOT EXISTS return_items (id INTEGER PRIMARY KEY AUTOINCREMENT, batch_id TEXT, barcode TEXT, return_type TEXT, expiry_date TEXT, quantity INTEGER, quality_status TEXT, damage_reason TEXT, operator TEXT, approval_status TEXT, created_at TEXT, remark TEXT)") 
+    # 修正欄位結構，確保與 INSERT 語句匹配
     cursor.execute("CREATE TABLE IF NOT EXISTS change_requests (req_id INTEGER PRIMARY KEY AUTOINCREMENT, item_id INTEGER, action TEXT, old_qty INTEGER, new_qty INTEGER, new_status TEXT, new_expiry TEXT, reason TEXT, status TEXT)") 
     conn.commit(); conn.close() 
 
@@ -120,10 +121,7 @@ else:
     with tabs[1]: 
         st.header("🔍 歷史紀錄與更正") 
         with st.expander("⚙️ 篩選條件設定", expanded=True): 
-            c1, c2 = st.columns(2); s_start = c1.date_input("開始日期", value=None); s_end = c2.date_input("結束日期", value=None) 
             s_batch = st.text_input("退貨單號 (批號)") 
-            c3, c4, c5 = st.columns(3); s_barcode = c3.text_input("商品條碼"); s_operator = c4.text_input("作業員"); s_type = c5.multiselect("形態", ["箱出", "散出", "組出"]) 
-            c6, c7 = st.columns(2); s_channel = c6.multiselect("通路", ["MOMO", "寶雅", "康是美", "屈臣氏", "蝦皮", "家購", "大智通", "好市多","PCHPME","松本清","唐吉訶德"]); s_quality = c7.multiselect("貨況", ["良品", "不良品"]) 
             if st.button("查詢數據"): 
                 conn = get_db_connection() 
                 query = "SELECT i.*, b.channel FROM return_items i LEFT JOIN return_batches b ON i.batch_id = b.batch_id WHERE i.batch_id LIKE ?" 
@@ -151,33 +149,12 @@ else:
             elif act == "效期更正": 
                 n_e = st.text_input("新有效期限 (格式:20260618)"); n_q = st.number_input("新數量", step=1); res = st.text_input("說明原因")
             
-            if selected.empty:
-    st.warning("請先勾選要更正的資料")
-    st.stop()
-
-if st.button("⚠️ 送出更正申請"):
-    conn = get_db_connection()
-
-    for _, row in selected.iterrows():
-        conn.execute("""
-        INSERT INTO change_requests 
-        (item_id, action, old_qty, new_qty, new_status, new_expiry, reason, status)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            int(float(row['ID'])),
-            act,
-            int(float(row['數量'])),
-            int(n_q),
-            n_s,
-            n_e,
-            res,
-            "審核中"
-        ))
-
-    conn.commit()
-    conn.close()
-    st.warning("✅ 申請已送出")
+            if st.button("⚠️ 送出更正申請"): 
+                conn = get_db_connection() 
+                for _, row in selected.iterrows(): 
+                    conn.execute("INSERT INTO change_requests (item_id, action, old_qty, new_qty, new_status, new_expiry, reason, status) VALUES (?, ?, ?, ?, ?, ?, ?, '審核中')", 
+                                 (int(row['ID']), act, int(row['數量']), int(n_q), n_s, n_e, res)) 
+                conn.commit(); conn.close(); st.warning("✅ 申請已送出") 
 
     with tabs[2]: 
         st.header("🔔 主管審核工作台") 
