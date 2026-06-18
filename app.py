@@ -154,8 +154,9 @@ else:
             if st.button("⚠️ 送出更正申請"): 
                 conn = get_db_connection() 
                 for _, row in selected.iterrows(): 
-                    conn.execute("INSERT INTO change_requests (item_id, action, old_qty, new_qty, new_status, new_expiry, reason, status) VALUES (?, ?, ?, ?, ?, ?, ?, '審核中')", 
-                                 (row['ID'], act, row['數量'], str(n_q), n_s, n_e, res)) 
+                    conn.execute("""INSERT INTO change_requests (item_id, action, old_qty, new_qty, new_status, new_expiry, reason, status) 
+                                    VALUES (?, ?, ?, ?, ?, ?, ?, '審核中')""", 
+                                 (int(row['ID']), act, int(row['數量']), int(n_q), n_s, n_e, res)) 
                 conn.commit(); conn.close(); st.warning("✅ 申請已送出") 
 
     with tabs[2]: 
