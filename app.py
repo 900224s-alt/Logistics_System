@@ -135,9 +135,22 @@ else:
             if st.button("⚠️ 送出申請"):
                 conn = get_db_connection()
                 for _, row in selected.iterrows():
-                    conn.execute("INSERT INTO change_requests (item_id, action, old_qty, new_qty, new_status, new_expiry, reason, status) VALUES (?, ?, ?, ?, ?, ?, ?, '審核中')", 
-                                 (int(row['ID']), act, int(row['數量']), int(n_q), n_s, n_e, n_reason if n_reason else act, "審核中"))
-                conn.commit(); conn.close(); st.warning("申請已送出")
+                    # 修正：將 '審核中' 也改為問號佔位符
+                    sql = "INSERT INTO change_requests (item_id, action, old_qty, new_qty, new_status, new_expiry, reason, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+                    params = (
+                        int(row['ID']), 
+                        act, 
+                        int(row['數量']), 
+                        int(n_q), 
+                        n_s, 
+                        n_e, 
+                        n_reason if n_reason else act, 
+                        "審核中"
+                    )
+                    conn.execute(sql, params)
+                conn.commit()
+                conn.close()
+                st.warning("申請已送出")
     with tabs[2]:
         st.header("🔔 主管審核工作台")
         conn = get_db_connection()
