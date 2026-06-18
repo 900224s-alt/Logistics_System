@@ -199,9 +199,6 @@ else:
     with tabs[3]:
         st.header("👥 員工權限")
         conn = get_db_connection(); st.dataframe(pd.read_sql_query("SELECT * FROM users", conn), use_container_width=True); conn.close()
-    with tabs[3]:
-        st.header("👥 員工權限")
-        conn = get_db_connection(); st.dataframe(pd.read_sql_query("SELECT * FROM users", conn), use_container_width=True); conn.close()
         t_u = st.text_input("操作姓名").strip()
         c1, c2, c3 = st.columns(3)
         if c1.button("🎖️ 升職"): conn = get_db_connection(); conn.execute("UPDATE users SET role = '管理者' WHERE username = ?", (t_u,)); conn.commit(); conn.close(); st.rerun()
