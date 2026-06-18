@@ -48,8 +48,8 @@ def get_tw_now():
  if not st.session_state['logged_in']: 
   tab1, tab2 = st.tabs(["👤 帳號登入", "📝 新人員註冊"]) 
  with tab1: 
- login_name = st.text_input("請輸入中文真實姓名", key="login_name").strip() 
- login_pwd = st.text_input("請輸入密碼", type="password", key="login_pwd") 
+  login_name = st.text_input("請輸入中文真實姓名", key="login_name").strip() 
+  login_pwd = st.text_input("請輸入密碼", type="password", key="login_pwd") 
  if st.button("進入系統", use_container_width=True): 
   conn = get_db_connection() 
   user = conn.execute('SELECT * FROM users WHERE username = ? AND password = ?', (login_name, login_pwd)).fetchone() 
