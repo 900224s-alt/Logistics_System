@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 def get_tw_now():
     return datetime.utcnow() + timedelta(hours=8)
 
-# --- 莫蘭迪配色 ---
+# --- 莫蘭迪配色設定 ---
 st.markdown("""
 <style>
     div.stButton > button[kind="primary"] { background-color: #8da3b4 !important; border: none !important; color: white !important; }
@@ -42,8 +42,8 @@ st.title("📦 物流退貨點收系統")
 if not st.session_state['logged_in']:
     tab1, tab2 = st.tabs(["👤 帳號登入", "📝 新人員註冊"])
     with tab1:
-        login_name = st.text_input("真實姓名", key="login_name").strip()
-        login_pwd = st.text_input("密碼", type="password", key="login_pwd")
+        login_name = st.text_input("請輸入中文真實姓名", key="login_name").strip()
+        login_pwd = st.text_input("請輸入密碼", type="password", key="login_pwd")
         if st.button("進入系統"):
             conn = get_db_connection()
             user = conn.execute('SELECT * FROM users WHERE username = ? AND password = ?', (login_name, login_pwd)).fetchone()
@@ -52,8 +52,8 @@ if not st.session_state['logged_in']:
                 st.session_state.update({'logged_in': True, 'username': login_name, 'is_admin': (user['role'] == "管理者" or login_name == ORIGINAL_ADMIN)})
                 st.rerun()
     with tab2:
-        reg_name = st.text_input("真實姓名", key="reg_name").strip()
-        reg_pwd = st.text_input("密碼", type="password", key="reg_pwd")
+        reg_name = st.text_input("請輸入你的中文真實姓名", key="reg_name").strip()
+        reg_pwd = st.text_input("自訂密碼", type="password", key="reg_pwd")
         if st.button("建立帳號"):
             conn = get_db_connection()
             try:
@@ -69,47 +69,61 @@ else:
     with tabs[0]:
         if not st.session_state.get('current_batch_id'):
             st.subheader("🚀 請設定本次作業環境與通路")
+            conn = get_db_connection()
+            unfinished = conn.execute("SELECT batch_id, channel FROM return_batches WHERE status = '作業中'").fetchall()
+            for b in unfinished:
+                count = conn.execute("SELECT COUNT(*) FROM return_items WHERE batch_id = ?", (b['batch_id'],)).fetchone()[0]
+                if st.button(f"繼續作業：:red[{b['batch_id']}] (:red[{b['channel']}]) | 已完成 {count} 筆"): st.session_state.update({'current_batch_id': b['batch_id'], 'current_channel': b['channel']}); st.rerun()
+            conn.close()
             env = st.radio("⚙️ 作業環境", ["正式環境", "測試環境"], horizontal=True) if st.session_state.get('is_admin') else "正式環境"
             chan = st.selectbox("🏬 選擇退貨通路", ["請選擇...", "MOMO", "寶雅", "康是美", "屈臣氏", "蝦皮", "家購", "大智通", "好市多","PCHPME","松本清","唐吉訶德"])
             if st.button("鎖定並開始作業"):
                 prefix = "TEST" if env == "測試環境" else "Back"
-                bid = prefix + get_tw_now().strftime("%Y%m%d") + "001"
-                conn = get_db_connection(); conn.execute("INSERT INTO return_batches VALUES (?, ?, ?, '作業中')", (bid, chan, get_tw_now().strftime("%Y%m%d"))); conn.commit(); conn.close()
+                today = get_tw_now().strftime("%Y%m%d")
+                conn = get_db_connection()
+                count = conn.execute("SELECT COUNT(*) FROM return_batches WHERE batch_id LIKE ?", (f"{prefix}{today}%",)).fetchone()[0]
+                bid = f"{prefix}{today}{count+1:03d}"
+                conn.execute("INSERT INTO return_batches VALUES (?, ?, ?, '作業中')", (bid, chan, today))
+                conn.commit(); conn.close()
                 st.session_state.update({'current_batch_id': bid, 'current_channel': chan}); st.rerun()
         else:
-            st.info(f"批號：{st.session_state.get('current_batch_id')}")
-            b_input = st.text_input("商品條碼"); r_type = st.radio("退貨形態", ["箱出", "散出", "組出"], horizontal=True)
-            exp_date = st.text_input("有效期限"); qty = st.number_input("數量", min_value=1, step=1, value=1)
-            qual = st.radio("商品貨況", ["良品", "不良品"], horizontal=True) if r_type != "箱出" else "良品"
+            st.info(f"🏬 通路：**{st.session_state.get('current_channel')}** ｜ 🧾 批號：**{st.session_state.get('current_batch_id')}**")
+            b_input = st.text_input("🔍 請刷取商品條碼", key="barcode_field")
+            r_type = st.radio("退貨形態", ["箱出", "散出", "組出"], horizontal=True)
+            exp_date = st.text_input("有效期限")
+            qty = st.number_input("數量", min_value=1, step=1, value=1)
+            qual = st.radio("商品貨況", ["良品", "不良品"], horizontal=True)
             reason = ", ".join(st.multiselect("不良原因", DAMAGE_REASONS)) if qual == "不良品" else ""
             remark = st.text_input("備註欄")
-            if st.button("💾 儲存並繼續新增", type="primary"):
+            
+            if st.button("💾 儲存並繼續新增", use_container_width=True, type="primary"):
                 conn = get_db_connection()
                 conn.execute("INSERT INTO return_items (batch_id, barcode, return_type, expiry_date, quantity, quality_status, damage_reason, operator, approval_status, created_at, remark) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (st.session_state['current_batch_id'], b_input, r_type, exp_date, qty, qual, reason, st.session_state['username'], '已確認', get_tw_now().strftime("%Y-%m-%d %H:%M:%S"), remark))
                 conn.commit(); conn.close(); st.success("儲存成功")
+            
             c1, c2 = st.columns(2)
-            c1.button("🔙 返回 / 暫停作業", key="back-btn", on_click=lambda: st.session_state.update({'current_channel': "", 'current_batch_id': ""}))
-            c2.button("🛑 結束作業並關單", key="close-btn", on_click=lambda: (conn := get_db_connection(), conn.execute("UPDATE return_batches SET status = '已完成' WHERE batch_id = ?", (st.session_state['current_batch_id'],)), conn.commit(), conn.close(), st.session_state.update({'current_channel': "", 'current_batch_id': ""}), st.rerun()))
+            if c1.button("🔙 返回 / 暫停作業", use_container_width=True, key="back-btn"): st.session_state.update({'current_channel': "", 'current_batch_id': ""}); st.rerun()
+            if c2.button("🛑 結束作業並關單", use_container_width=True, key="close-btn"):
+                conn = get_db_connection(); conn.execute("UPDATE return_batches SET status = '已完成' WHERE batch_id = ?", (st.session_state['current_batch_id'],)); conn.commit(); conn.close()
+                st.session_state.update({'current_channel': "", 'current_batch_id': ""}); st.rerun()
 
     with tabs[1]:
         st.header("🔍 歷史紀錄與更正")
         with st.expander("⚙️ 篩選條件設定", expanded=True):
-            s_start = st.date_input("開始日期", None); s_end = st.date_input("結束日期", None)
-            s_batch = st.text_input("退貨單號 (批號)")
-            c3, c4, c5 = st.columns(3); s_barcode = c3.text_input("商品條碼"); s_operator = c4.text_input("作業員"); s_type = st.multiselect("形態", ["箱出", "散出", "組出"])
+            s_batch = st.text_input("單號 (批號)")
             if st.button("查詢數據"):
                 conn = get_db_connection()
-                df = pd.read_sql_query("SELECT id, created_at, batch_id, barcode, return_type, quantity, quality_status, damage_reason, operator FROM return_items WHERE batch_id LIKE ?", conn, params=(f"%{s_batch}%",))
+                df = pd.read_sql_query("SELECT id, created_at, batch_id, barcode, return_type, expiry_date, quantity, quality_status, damage_reason, operator FROM return_items WHERE batch_id LIKE ?", conn, params=(f"%{s_batch}%",))
                 df.insert(0, "選取", False); st.session_state['df'] = df; conn.close()
         
         if 'df' in st.session_state and not st.session_state['df'].empty:
             edited_df = st.data_editor(st.session_state['df'], disabled=st.session_state['df'].columns.drop("選取"), hide_index=True)
             selected = edited_df[edited_df["選取"] == True]
             act = st.selectbox("動作", ["更正數量", "貨況轉換", "效期更正", "刪除資料"])
-            n_q, n_s, n_reason, n_e = 0, "", "", ""
-            if act in ["更正數量", "貨況轉換"]: n_q = st.number_input("新數量", step=1)
-            if act == "貨況轉換": n_s = st.radio("新貨況", ["良品", "不良品"]); n_reason = ", ".join(st.multiselect("不良原因", DAMAGE_REASONS)) if n_s == "不良品" else ""
-            if act == "效期更正": n_e = st.text_input("新效期"); n_q = st.number_input("新數量", step=1)
+            n_q = st.number_input("新數量", step=1)
+            n_s = st.radio("新貨況", ["良品", "不良品"], horizontal=True) if act == "貨況轉換" else ""
+            n_reason = ", ".join(st.multiselect("異常原因", DAMAGE_REASONS)) if act == "貨況轉換" and n_s == "不良品" else ""
+            n_e = st.text_input("新效期") if act == "效期更正" else ""
             
             if st.button("⚠️ 送出申請"):
                 conn = get_db_connection()
@@ -145,7 +159,7 @@ else:
     with tabs[3]:
         st.header("👥 員工權限")
         conn = get_db_connection(); st.dataframe(pd.read_sql_query("SELECT * FROM users", conn), use_container_width=True); conn.close()
-        t_u = st.text_input("操作姓名").strip()
+        t_u = st.text_input("操作員工姓名").strip()
         c1, c2, c3 = st.columns(3)
         if c1.button("🎖️ 升職"): conn = get_db_connection(); conn.execute("UPDATE users SET role = '管理者' WHERE username = ?", (t_u,)); conn.commit(); conn.close(); st.rerun()
         if c2.button("👤 降職"): conn = get_db_connection(); conn.execute("UPDATE users SET role = '一般用戶' WHERE username = ?", (t_u,)); conn.commit(); conn.close(); st.rerun()
