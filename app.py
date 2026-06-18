@@ -51,16 +51,17 @@ st.title("📦 物流退貨點收系統")
 if not st.session_state['logged_in']:
     tab1, tab2 = st.tabs(["👤 帳號登入", "📝 新人員註冊"])
     with tab1:
-        login_name = st.text_input("請輸入中文真實姓名", key="login_name").strip()
-        login_pwd = st.text_input("請輸入密碼", type="password", key="login_pwd")
+        login_name = st.text_input("余宸緯", key="login_name").strip()
+        login_pwd = st.text_input("0224", type="password", key="login_pwd")
         if st.button("進入系統"):
             conn = get_db_connection()
             user = conn.execute('SELECT * FROM users WHERE username = ?', (login_name,)).fetchone()
             
             if user:
-                # 帳號存在，檢查密碼與狀態
+                # 檢查密碼
                 if user['password'] == login_pwd:
-                    if user['status'] == 'approved':
+                    # 管理員豁免審核，或已審核通過者
+                    if login_name == ORIGINAL_ADMIN or user['status'] == 'approved':
                         st.session_state.update({'logged_in': True, 'username': login_name, 'is_admin': (user['role'] == "管理者" or login_name == ORIGINAL_ADMIN)})
                         st.rerun()
                     else:
@@ -68,7 +69,6 @@ if not st.session_state['logged_in']:
                 else:
                     st.error("❌ 密碼錯誤，請重新輸入。")
             else:
-                # 帳號不存在
                 st.error("❌ 查無此帳號，請確認姓名或前往註冊。")
             conn.close()
     with tab2:
