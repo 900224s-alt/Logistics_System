@@ -68,7 +68,7 @@ def get_tw_now():
   conn.commit(); st.success("註冊成功！") 
  except: st.error("❌ 姓名已被註冊。") 
  finally: conn.close() 
- else:
+else:
     st.sidebar.write(f"👤 作業員：**{st.session_state['username']}**")
     st.sidebar.write(f"🎖️ 權限：**{'管理者' if st.session_state.get('is_admin') else '一般用戶'}**")
 
