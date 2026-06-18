@@ -25,9 +25,9 @@ def get_tw_now():
  ] 
  
  def get_db_connection(): 
- conn = sqlite3.connect('return_system.db') 
- conn.row_factory = sqlite3.Row 
- return conn 
+  conn = sqlite3.connect('return_system.db') 
+  conn.row_factory = sqlite3.Row 
+  return conn 
  
  def init_db(): 
  conn = get_db_connection() 
