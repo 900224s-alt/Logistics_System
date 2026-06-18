@@ -122,15 +122,28 @@ else:
             c6, c7 = st.columns(2); s_channel = c6.multiselect("通路", ["MOMO", "寶雅", "康是美", "屈臣氏", "蝦皮", "家購", "大智通", "好市多","PCHPME","松本清","唐吉訶德"]); s_quality = c7.multiselect("貨況", ["良品", "不良品"]) 
             if st.button("查詢數據"): 
                 conn = get_db_connection() 
-                # 重新定義 14 欄查詢：選取(後加), 日期, 通路, ID, 退貨單號, 商品條碼, 箱散出, 效期, 數量, 良品不良品, 異常原因, 作業員, 訂單狀態, 時間
-                query = "SELECT created_at as 日期, b.channel as 通路, i.id as ID, i.batch_id as 退貨單號, i.barcode as 商品條碼, i.return_type as 箱散出, i.expiry_date as 效期, i.quantity as 數量, i.quality_status as 良品不良品, i.damage_reason as 異常原因, i.operator as 作業員, i.approval_status as 訂單狀態, i.created_at as 時間 FROM return_items i LEFT JOIN return_batches b ON i.batch_id = b.batch_id WHERE i.batch_id LIKE ?" 
-                df = pd.read_sql_query(query, conn, params=(f"%{s_batch}%",)) 
+                # 查詢原始資料
+                query = "SELECT i.created_at, b.channel, i.id, i.batch_id, i.barcode, i.return_type, i.expiry_date, i.quantity, i.quality_status, i.damage_reason, i.operator, i.approval_status, i.remark, i.created_at FROM return_items i LEFT JOIN return_batches b ON i.batch_id = b.batch_id WHERE i.batch_id LIKE ?" 
+                df = pd.read_sql_query(query, conn)
+                
+                # 建立選取方塊欄位
                 df.insert(0, "選取", False)
+                
+                # 重新命名以對應 14 欄位名稱
+                df.columns = ["選取", "日期", "通路", "ID", "退貨單號", "商品條碼", "箱散出", "效期", "數量", "良品不良品", "異常原因", "作業員", "訂單狀態", "備註", "時間"]
+                
+                # 強制指定 14 欄位的排序 (排除原本多出來的備註，確保剛好是您要的 14 欄位)
+                # 順序: 選取>日期>通路>ID>退貨單號>商品條碼>箱散出>效期>數量>良品不良品>異常原因>作業員>訂單狀態>時間
+                final_cols = ["選取", "日期", "通路", "ID", "退貨單號", "商品條碼", "箱散出", "效期", "數量", "良品不良品", "異常原因", "作業員", "訂單狀態", "時間"]
+                df = df[final_cols]
+                
                 conn.close(); st.session_state['df'] = df 
         
         if 'df' in st.session_state and not st.session_state['df'].empty: 
             edited_df = st.data_editor(st.session_state['df'], hide_index=True) 
             selected = edited_df[edited_df["選取"] == True] 
+            
+            # --- 其餘異常修正功能完全保持不變 ---
             st.subheader("🛠️ 異常修正操作區") 
             act = st.selectbox("選擇動作", ["更正數量", "貨況轉換", "刪除資料"]) 
             n_q, n_s, res = 0, "", "" 
