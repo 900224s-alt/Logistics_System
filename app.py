@@ -156,8 +156,7 @@ with tabs[1]:
                 for _, row in selected.iterrows(): 
                     conn.execute("INSERT INTO change_requests (item_id, action, old_qty, new_qty, new_status, reason, status) VALUES (?, ?, ?, ?, ?, ?, '審核中')", (row['ID'], act, row['數量'], str(n_q), n_s, res)) 
                 conn.commit(); conn.close(); st.warning("✅ 申請已送出")
-            else:
-                st.info("請勾選上方表格中的資料以進行操作")
+         
     with tabs[2]: 
         st.header("🔔 主管審核工作台") 
         conn = get_db_connection(); review_df = pd.read_sql_query("SELECT * FROM change_requests WHERE status = '審核中'", conn); conn.close() 
