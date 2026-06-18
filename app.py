@@ -72,9 +72,9 @@ def get_tw_now():
   st.sidebar.write(f"👤 作業員：**{st.session_state['username']}**")
   st.sidebar.write(f"🎖️ 權限：**{'管理者' if st.session_state.get('is_admin') else '一般用戶'}**")
 
-    if st.sidebar.button("登出系統"):
-        st.session_state.clear()
-        st.rerun()
+ if st.sidebar.button("登出系統"):
+    st.session_state.clear()
+    st.rerun()
 
     tabs = st.tabs(["📦 退貨點收作業","🔍 歷史紀錄與更正","🔔 主管審核工作台","👥 員工權限維護"])
  
