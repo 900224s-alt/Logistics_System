@@ -76,12 +76,7 @@ def get_tw_now():
         st.session_state.clear()
         st.rerun()
 
-    tabs = st.tabs([
-        "📦 退貨點收作業",
-        "🔍 歷史紀錄與更正",
-        "🔔 主管審核工作台",
-        "👥 員工權限維護"
-    ])
+    tabs = st.tabs(["📦 退貨點收作業","🔍 歷史紀錄與更正","🔔 主管審核工作台","👥 員工權限維護"])
  
  with tabs[0]: 
  if not st.session_state.get('current_batch_id'): 
