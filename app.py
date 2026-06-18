@@ -137,7 +137,7 @@ else:
             n_q = st.number_input("新數量", step=1)
             n_s = st.text_input("新貨況 (貨況轉換用)") if act == "貨況轉換" else ""
             n_e = st.text_input("新效期 (效期更正用)") if act == "效期更正" else ""
-           if st.button("⚠️ 送出更正申請"):
+        if st.button("⚠️ 送出更正申請"):
                 conn = get_db_connection()
                 try:
                     for _, row in selected.iterrows():
