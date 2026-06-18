@@ -1,12 +1,12 @@
 import streamlit as st 
-import sqlite3 
-import pandas as pd 
-from datetime import datetime, timedelta
-
-# --- 台灣時間工具 ---
-def get_tw_now():
-    return datetime.utcnow() + timedelta(hours=8)
-
+ import sqlite3 
+ import pandas as pd 
+ from datetime import datetime, timedelta
+ 
+ # --- 台灣時間工具 ---
+ def get_tw_now():
+ return datetime.utcnow() + timedelta(hours=8)
+ 
  # --- 莫蘭迪配色設定 --- 
  st.markdown(""" 
  <style> 
@@ -153,13 +153,13 @@ def get_tw_now():
  
  if st.button("⚠️ 送出更正申請"):
 
-    if selected.empty:
+ if selected.empty:
         st.warning("請先勾選要更正的資料")
         st.stop()
 
     conn = get_db_connection()
 
-    for _, row in selected.iterrows():
+ for _, row in selected.iterrows():
         conn.execute("""
         INSERT INTO change_requests 
         (item_id, action, old_qty, new_qty, new_status, new_expiry, reason, status)
