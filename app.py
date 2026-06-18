@@ -126,10 +126,30 @@ else:
             n_e = st.text_input("新效期") if act == "效期更正" else ""
             if st.button("⚠️ 送出申請"):
                 conn = get_db_connection()
-                for _, row in selected.iterrows():
-                    conn.execute("INSERT INTO change_requests (item_id, action, old_qty, new_qty, new_status, new_expiry, reason, status) VALUES (?, ?, ?, ?, ?, ?, ?, '審核中')", 
-                                 (int(row['id']), act, int(row['quantity']), int(n_q), n_s, n_e, n_reason if n_reason else act, "審核中"))
-                conn.commit(); conn.close(); st.warning("申請已送出")
+                try:
+                    for _, row in selected.iterrows():
+                        # 這是正確的寫法：8 個 ? 對應 8 個參數
+                        sql = """INSERT INTO change_requests 
+                                 (item_id, action, old_qty, new_qty, new_status, new_expiry, reason, status) 
+                                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)"""
+                        
+                        params = (
+                            int(row['id']), 
+                            str(act), 
+                            int(row['quantity']), 
+                            int(n_q), 
+                            str(n_s), 
+                            str(n_e), 
+                            str(n_reason if n_reason else act), 
+                            "審核中" # 第 8 個參數
+                        )
+                        conn.execute(sql, params)
+                    conn.commit()
+                    st.warning("✅ 申請已送出")
+                except Exception as e:
+                    st.error(f"寫入申請失敗: {e}")
+                finally:
+                    conn.close()
 
     with tabs[2]:
         st.header("🔔 主管審核工作台")
