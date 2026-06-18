@@ -67,32 +67,63 @@ else:
     tabs = st.tabs(["📦 退貨點收作業", "🔍 歷史紀錄與更正", "🔔 主管審核工作台", "👥 員工權限維護"])
 
     with tabs[0]:
+        # --- 優先檢查是否有進行中的單據 ---
+        conn = get_db_connection()
+        unfinished_tasks = conn.execute("SELECT batch_id, channel FROM return_batches WHERE status = '作業中'").fetchall()
+        conn.close()
+
+        if unfinished_tasks and not st.session_state.get('current_batch_id'):
+            st.subheader("⚠️ 發現未完成的作業")
+            for task in unfinished_tasks:
+                conn = get_db_connection()
+                item_count = conn.execute("SELECT COUNT(*) FROM return_items WHERE batch_id = ?", (task['batch_id'],)).fetchone()[0]
+                conn.close()
+                
+                # 紅字顯示單號與通路
+                if st.button(f"繼續作業：:red[{task['batch_id']}] (:red[{task['channel']}]) | 已完成 {item_count} 筆"):
+                    st.session_state.update({'current_batch_id': task['batch_id'], 'current_channel': task['channel']})
+                    st.rerun()
+
         if not st.session_state.get('current_batch_id'):
+            st.divider()
             st.subheader("🚀 請設定本次作業環境與通路")
             env = st.radio("⚙️ 作業環境", ["正式環境", "測試環境"], horizontal=True) if st.session_state.get('is_admin') else "正式環境"
             chan = st.selectbox("🏬 選擇退貨通路", ["請選擇...", "MOMO", "寶雅", "康是美", "屈臣氏", "蝦皮", "家購", "大智通", "好市多","PCHPME","松本清","唐吉訶德"])
+            
             if st.button("鎖定並開始作業"):
-                prefix = "TEST" if env == "測試環境" else "Back"
-                bid = prefix + get_tw_now().strftime("%Y%m%d") + "001"
-                conn = get_db_connection(); conn.execute("INSERT INTO return_batches VALUES (?, ?, ?, '作業中')", (bid, chan, get_tw_now().strftime("%Y%m%d"))); conn.commit(); conn.close()
-                st.session_state.update({'current_batch_id': bid, 'current_channel': chan}); st.rerun()
-        else:
+                if chan == "請選擇...":
+                    st.error("請先選擇退貨通路！")
+                else:
+                    prefix = "TEST" if env == "測試環境" else "Back"
+                    today = get_tw_now().strftime("%Y%m%d")
+                    conn = get_db_connection()
+                    count = conn.execute("SELECT COUNT(*) FROM return_batches WHERE batch_id LIKE ?", (f"{prefix}{today}%",)).fetchone()[0]
+                    bid = f"{prefix}{today}{count + 1:03d}"
+                    conn.execute("INSERT INTO return_batches VALUES (?, ?, ?, '作業中')", (bid, chan, today))
+                    conn.commit(); conn.close()
+                    st.session_state.update({'current_batch_id': bid, 'current_channel': chan})
+                    st.rerun()
+        
+        # --- 點收介面 ---
+        elif st.session_state.get('current_batch_id'):
             st.info(f"🏬 通路：**{st.session_state.get('current_channel')}** ｜ 🧾 批號：**{st.session_state.get('current_batch_id')}**")
             b_input = st.text_input("🔍 請刷取商品條碼", key="barcode_field")
-            r_type = st.radio("退貨形態", ["箱出", "散出", "組出"], horizontal=True)
-            exp_date = st.text_input("有效期限")
+            r_type = st.radio("選擇退貨形態", ["箱出", "散出", "組出"], horizontal=True)
+            exp_date = st.text_input("有效期限 (格式:20260618)")
             qty = st.number_input("數量", min_value=1, step=1, value=1)
             qual = st.radio("商品貨況", ["良品", "不良品"], horizontal=True)
             reason = ", ".join(st.multiselect("不良原因", DAMAGE_REASONS)) if qual == "不良品" else ""
             remark = st.text_input("備註欄")
+            
             if st.button("💾 儲存並繼續新增", use_container_width=True, type="primary"):
                 conn = get_db_connection()
-                conn.execute("INSERT INTO return_items (batch_id, barcode, return_type, expiry_date, quantity, quality_status, damage_reason, operator, approval_status, created_at, remark) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (st.session_state['current_batch_id'], b_input, r_type, exp_date, qty, qual, reason, st.session_state['username'], '已確認', get_tw_now().strftime("%Y-%m-%d %H:%M:%S"), remark))
+                conn.execute("INSERT INTO return_items (batch_id, barcode, return_type, expiry_date, quantity, quality_status, damage_reason, operator, approval_status, created_at, remark) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", 
+                             (st.session_state['current_batch_id'], b_input, r_type, exp_date, qty, qual, reason, st.session_state['username'], '已確認', get_tw_now().strftime("%Y-%m-%d %H:%M:%S"), remark))
                 conn.commit(); conn.close(); st.success("儲存成功")
+            
             c1, c2 = st.columns(2)
             c1.button("🔙 返回 / 暫停作業", use_container_width=True, key="back-btn", on_click=lambda: st.session_state.update({'current_channel': "", 'current_batch_id': ""}))
             c2.button("🛑 結束作業並關單", use_container_width=True, key="close-btn", on_click=lambda: (conn := get_db_connection(), conn.execute("UPDATE return_batches SET status = '已完成' WHERE batch_id = ?", (st.session_state['current_batch_id'],)), conn.commit(), conn.close(), st.session_state.update({'current_channel': "", 'current_batch_id': ""}), st.rerun()))
-
     with tabs[1]:
         st.header("🔍 歷史紀錄與更正")
         with st.expander("⚙️ 篩選條件設定", expanded=True):
