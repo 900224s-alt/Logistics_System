@@ -46,22 +46,22 @@ def get_tw_now():
  st.title("📦 物流退貨點收系統") 
  
  if not st.session_state['logged_in']: 
- tab1, tab2 = st.tabs(["👤 帳號登入", "📝 新人員註冊"]) 
+  tab1, tab2 = st.tabs(["👤 帳號登入", "📝 新人員註冊"]) 
  with tab1: 
  login_name = st.text_input("請輸入中文真實姓名", key="login_name").strip() 
  login_pwd = st.text_input("請輸入密碼", type="password", key="login_pwd") 
  if st.button("進入系統", use_container_width=True): 
- conn = get_db_connection() 
- user = conn.execute('SELECT * FROM users WHERE username = ? AND password = ?', (login_name, login_pwd)).fetchone() 
- conn.close() 
+  conn = get_db_connection() 
+  user = conn.execute('SELECT * FROM users WHERE username = ? AND password = ?', (login_name, login_pwd)).fetchone() 
+  conn.close() 
  if user: 
- st.session_state.update({'logged_in': True, 'username': login_name, 'is_admin': (user['role'] == "管理者" or login_name == ORIGINAL_ADMIN)}) 
- st.rerun() 
+  st.session_state.update({'logged_in': True, 'username': login_name, 'is_admin': (user['role'] == "管理者" or login_name == ORIGINAL_ADMIN)}) 
+  st.rerun() 
  with tab2: 
  reg_name = st.text_input("請輸入你的中文真實姓名", key="reg_name").strip() 
  reg_pwd = st.text_input("自訂密碼", type="password", key="reg_pwd") 
  if st.button("建立帳號", use_container_width=True): 
- conn = get_db_connection() 
+  conn = get_db_connection() 
  try: 
  role = "管理者" if reg_name == ORIGINAL_ADMIN else "一般用戶" 
  conn.execute('INSERT INTO users VALUES (?, ?, ?, ?)', (reg_name, reg_pwd, get_tw_now().strftime("%Y-%m-%d %H:%M:%S"), role)) 
