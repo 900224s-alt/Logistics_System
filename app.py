@@ -162,36 +162,54 @@ else:
 
     with tabs[2]: 
         st.header("🔔 主管審核工作台") 
-        conn = get_db_connection() 
-        # 改為 JOIN 以便顯示正確資訊，只篩選您指定的欄位
-        query = """SELECT c.req_id, c.item_id, c.action, c.old_qty, c.new_qty, c.reason, c.new_status, c.new_expiry, 
-                   i.created_at as apply_time, i.batch_id, i.barcode, i.operator as applicant 
-                   FROM change_requests c JOIN return_items i ON c.item_id = i.id WHERE c.status = '審核中'"""
-        review_df = pd.read_sql_query(query, conn) 
+        conn = get_db_connection()
+        # 改用 LEFT JOIN，確保即使 item 被刪除，申請單仍然可見
+        # 同時移除可能造成衝突的欄位選擇，改為先撈取所有資料再進行處理
+        try:
+            review_df = pd.read_sql_query("SELECT c.*, i.batch_id, i.barcode, i.created_at as apply_time, i.operator as applicant FROM change_requests c LEFT JOIN return_items i ON c.item_id = i.id WHERE c.status = '審核中'", conn)
+        except Exception as e:
+            st.error(f"查詢失敗，可能是資料庫結構不一致: {e}")
+            review_df = pd.DataFrame()
         conn.close() 
+
         if not review_df.empty: 
-            # 依照您指定的欄位顯示：申請日期時間>單號>商品條碼>修正原因>修正前數量>修正後數量>申請人
-            display_df = review_df[['apply_time', 'batch_id', 'barcode', 'reason', 'old_qty', 'new_qty', 'applicant']]
+            # 確保欄位存在，避免 DataFrame 欄位不存在導致崩潰
+            cols_to_show = ['apply_time', 'batch_id', 'barcode', 'reason', 'old_qty', 'new_qty', 'applicant']
+            # 過濾掉不存在的欄位，防止報錯
+            available_cols = [c for c in cols_to_show if c in review_df.columns]
+            
+            display_df = review_df[available_cols].copy()
             display_df.columns = ['申請日期時間', '單號', '商品條碼', '修正原因', '修正前數量', '修正後數量', '申請人']
             display_df.insert(0, "同意", False) 
+            
             reviewed_df = st.data_editor(display_df, hide_index=True) 
+            
             if st.button("🟢 批量處理同意"): 
                 conn = get_db_connection() 
                 for i, row in reviewed_df.iterrows(): 
                     if row.get("同意"): 
-                        req_data = review_df.iloc[i]
-                        item = conn.execute("SELECT * FROM return_items WHERE id = ?", (req_data['item_id'],)).fetchone() 
+                        req_id = review_df.iloc[i]['req_id']
+                        item_id = review_df.iloc[i]['item_id']
+                        action = review_df.iloc[i]['action']
+                        
+                        # 重新確認 item 是否存在
+                        item = conn.execute("SELECT * FROM return_items WHERE id = ?", (int(item_id),)).fetchone() 
+                        
                         if item: 
-                            if req_data['action'] == "刪除資料": conn.execute("DELETE FROM return_items WHERE id = ?", (req_data['item_id'],)) 
-                            elif req_data['action'] == "更正數量": conn.execute("UPDATE return_items SET quantity = ? WHERE id = ?", (int(row['修正後數量']), req_data['item_id'])) 
-                            elif req_data['action'] == "效期更正": conn.execute("UPDATE return_items SET expiry_date = ?, quantity = ? WHERE id = ?", (req_data['new_expiry'], int(row['修正後數量']), req_data['item_id'])) 
-                            elif req_data['action'] == "貨況轉換": 
+                            if action == "刪除資料": 
+                                conn.execute("DELETE FROM return_items WHERE id = ?", (int(item_id),)) 
+                            elif action == "更正數量": 
+                                conn.execute("UPDATE return_items SET quantity = ? WHERE id = ?", (int(row['修正後數量']), int(item_id))) 
+                            elif action == "效期更正": 
+                                conn.execute("UPDATE return_items SET expiry_date = ?, quantity = ? WHERE id = ?", (review_df.iloc[i]['new_expiry'], int(row['修正後數量']), int(item_id))) 
+                            elif action == "貨況轉換": 
                                 old_q, new_q = int(item['quantity']), int(row['修正後數量']) 
-                                conn.execute("UPDATE return_items SET quantity = ? WHERE id = ?", (old_q - new_q, req_data['item_id'])) 
-                                conn.execute('''INSERT INTO return_items (batch_id, barcode, return_type, quantity, quality_status, damage_reason, operator, approval_status, created_at) VALUES (?, ?, ?, ?, ?, ?, '審核系統', '已確認', ?)''', (item['batch_id'], item['barcode'], item['return_type'], new_q, req_data['new_status'], req_data['reason'], get_tw_now().strftime("%Y-%m-%d %H:%M:%S"))) 
-                            conn.execute("UPDATE change_requests SET status = '已確認' WHERE req_id = ?", (req_data['req_id'],)) 
-                conn.commit(); conn.close(); st.success("✅ 處理完成"); st.rerun() 
-
+                                conn.execute("UPDATE return_items SET quantity = ? WHERE id = ?", (old_q - new_q, int(item_id))) 
+                                conn.execute('''INSERT INTO return_items (batch_id, barcode, return_type, quantity, quality_status, damage_reason, operator, approval_status, created_at) VALUES (?, ?, ?, ?, ?, ?, '審核系統', '已確認', ?)''', 
+                                             (item['batch_id'], item['barcode'], item['return_type'], new_q, review_df.iloc[i]['new_status'], review_df.iloc[i]['reason'], get_tw_now().strftime("%Y-%m-%d %H:%M:%S"))) 
+                            
+                            conn.execute("UPDATE change_requests SET status = '已確認' WHERE req_id = ?", (int(req_id),)) 
+                conn.commit(); conn.close(); st.success("✅ 處理完成"); st.rerun()
     with tabs[3]: 
         st.header("👥 員工權限與離職維護") 
         conn = get_db_connection(); st.dataframe(pd.read_sql_query("SELECT * FROM users", conn), use_container_width=True); conn.close() 
