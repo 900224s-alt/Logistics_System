@@ -122,24 +122,22 @@ else:
             c6, c7 = st.columns(2); s_channel = c6.multiselect("通路", ["MOMO", "寶雅", "康是美", "屈臣氏", "蝦皮", "家購", "大智通", "好市多","PCHPME","松本清","唐吉訶德"]); s_quality = c7.multiselect("貨況", ["良品", "不良品"]) 
             if st.button("查詢數據"): 
                 conn = get_db_connection() 
-                # 改用最穩定的 SELECT * 查詢，避免欄位名稱對不上導致崩潰
                 query = "SELECT i.*, b.channel FROM return_items i LEFT JOIN return_batches b ON i.batch_id = b.batch_id WHERE i.batch_id LIKE ?" 
-                df = pd.read_sql_query(query, conn, params=(f"%{s_batch}%",))
-                conn.close()
+                df = pd.read_sql_query(query, conn, params=(f"%{s_batch}%",)) 
                 
-                # 在 Python 端手動調整順序，確保不破壞資料庫查詢
-                # 原始欄位可能包含: id, batch_id, barcode, return_type, expiry_date, quantity, quality_status, damage_reason, operator, approval_status, created_at, remark, channel
+                # --- 處理日期格式：只取 YYYY-MM-DD ---
+                # 將 created_at 轉為 datetime 物件，再格式化為字串
+                df['clean_date'] = pd.to_datetime(df['created_at']).dt.strftime('%Y-%m-%d')
+                
+                # 建立選取方塊
                 df.insert(0, "選取", False)
                 
-                # 手動定義映射順序 (這裡將資料庫欄位對應到您的 14 欄)
-                # 您指定的順序: 選取方塊>日期>通路>ID>退貨單號>商品條碼>箱散出>效期>數量>良品不良品>異常原因>作業員>訂單狀態>時間
-                try:
-                    df = df[['選取', 'created_at', 'channel', 'id', 'batch_id', 'barcode', 'return_type', 'expiry_date', 'quantity', 'quality_status', 'damage_reason', 'operator', 'approval_status', 'created_at']]
-                    df.columns = ["選取", "日期", "通路", "ID", "退貨單號", "商品條碼", "箱散出", "效期", "數量", "良品不良品", "異常原因", "作業員", "訂單狀態", "時間"]
-                except Exception as e:
-                    st.error(f"欄位對應錯誤，請檢查資料庫結構: {e}")
+                # 重新排列欄位與命名 (依照您的 14 欄順序)
+                # 選取>日期(clean_date)>通路>ID>退貨單號>商品條碼>箱散出>效期>數量>良品不良品>異常原因>作業員>訂單狀態>時間
+                df = df[['選取', 'clean_date', 'channel', 'id', 'batch_id', 'barcode', 'return_type', 'expiry_date', 'quantity', 'quality_status', 'damage_reason', 'operator', 'approval_status', 'created_at']]
+                df.columns = ["選取", "日期", "通路", "ID", "退貨單號", "商品條碼", "箱散出", "效期", "數量", "良品不良品", "異常原因", "作業員", "訂單狀態", "時間"]
                 
-                st.session_state['df'] = df 
+                conn.close(); st.session_state['df'] = df
         
         if 'df' in st.session_state and not st.session_state['df'].empty: 
             edited_df = st.data_editor(st.session_state['df'], hide_index=True) 
