@@ -122,28 +122,30 @@ else:
             c6, c7 = st.columns(2); s_channel = c6.multiselect("通路", ["MOMO", "寶雅", "康是美", "屈臣氏", "蝦皮", "家購", "大智通", "好市多","PCHPME","松本清","唐吉訶德"]); s_quality = c7.multiselect("貨況", ["良品", "不良品"]) 
             if st.button("查詢數據"): 
                 conn = get_db_connection() 
-                # 查詢原始資料
-                query = "SELECT i.created_at, b.channel, i.id, i.batch_id, i.barcode, i.return_type, i.expiry_date, i.quantity, i.quality_status, i.damage_reason, i.operator, i.approval_status, i.remark, i.created_at FROM return_items i LEFT JOIN return_batches b ON i.batch_id = b.batch_id WHERE i.batch_id LIKE ?" 
-                df = pd.read_sql_query(query, conn)
+                # 改用最穩定的 SELECT * 查詢，避免欄位名稱對不上導致崩潰
+                query = "SELECT i.*, b.channel FROM return_items i LEFT JOIN return_batches b ON i.batch_id = b.batch_id WHERE i.batch_id LIKE ?" 
+                df = pd.read_sql_query(query, conn, params=(f"%{s_batch}%",))
+                conn.close()
                 
-                # 建立選取方塊欄位
+                # 在 Python 端手動調整順序，確保不破壞資料庫查詢
+                # 原始欄位可能包含: id, batch_id, barcode, return_type, expiry_date, quantity, quality_status, damage_reason, operator, approval_status, created_at, remark, channel
                 df.insert(0, "選取", False)
                 
-                # 重新命名以對應 14 欄位名稱
-                df.columns = ["選取", "日期", "通路", "ID", "退貨單號", "商品條碼", "箱散出", "效期", "數量", "良品不良品", "異常原因", "作業員", "訂單狀態", "備註", "時間"]
+                # 手動定義映射順序 (這裡將資料庫欄位對應到您的 14 欄)
+                # 您指定的順序: 選取方塊>日期>通路>ID>退貨單號>商品條碼>箱散出>效期>數量>良品不良品>異常原因>作業員>訂單狀態>時間
+                try:
+                    df = df[['選取', 'created_at', 'channel', 'id', 'batch_id', 'barcode', 'return_type', 'expiry_date', 'quantity', 'quality_status', 'damage_reason', 'operator', 'approval_status', 'created_at']]
+                    df.columns = ["選取", "日期", "通路", "ID", "退貨單號", "商品條碼", "箱散出", "效期", "數量", "良品不良品", "異常原因", "作業員", "訂單狀態", "時間"]
+                except Exception as e:
+                    st.error(f"欄位對應錯誤，請檢查資料庫結構: {e}")
                 
-                # 強制指定 14 欄位的排序 (排除原本多出來的備註，確保剛好是您要的 14 欄位)
-                # 順序: 選取>日期>通路>ID>退貨單號>商品條碼>箱散出>效期>數量>良品不良品>異常原因>作業員>訂單狀態>時間
-                final_cols = ["選取", "日期", "通路", "ID", "退貨單號", "商品條碼", "箱散出", "效期", "數量", "良品不良品", "異常原因", "作業員", "訂單狀態", "時間"]
-                df = df[final_cols]
-                
-                conn.close(); st.session_state['df'] = df 
+                st.session_state['df'] = df 
         
         if 'df' in st.session_state and not st.session_state['df'].empty: 
             edited_df = st.data_editor(st.session_state['df'], hide_index=True) 
-            selected = edited_df[edited_df["選取"] == True] 
+            st.download_button("📥 下載 CSV 報表", edited_df.to_csv(index=False), "history.csv")
             
-            # --- 其餘異常修正功能完全保持不變 ---
+            selected = edited_df[edited_df["選取"] == True] 
             st.subheader("🛠️ 異常修正操作區") 
             act = st.selectbox("選擇動作", ["更正數量", "貨況轉換", "刪除資料"]) 
             n_q, n_s, res = 0, "", "" 
@@ -155,8 +157,7 @@ else:
                 conn = get_db_connection() 
                 for _, row in selected.iterrows(): 
                     conn.execute("INSERT INTO change_requests (item_id, action, old_qty, new_qty, new_status, reason, status) VALUES (?, ?, ?, ?, ?, ?, '審核中')", (row['ID'], act, row['數量'], str(n_q), n_s, res)) 
-                conn.commit(); conn.close(); st.warning("✅ 申請已送出") 
-
+                conn.commit(); conn.close(); st.warning("✅ 申請已送出")
     with tabs[2]: 
         st.header("🔔 主管審核工作台") 
         conn = get_db_connection(); review_df = pd.read_sql_query("SELECT * FROM change_requests WHERE status = '審核中'", conn); conn.close() 
