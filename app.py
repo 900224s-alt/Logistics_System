@@ -168,8 +168,20 @@ else:
                 st.warning(f"✅ 儲存成功！目前本單已完成：{st.session_state.get('last_count')} 筆")
                 if st.button("確認"): st.session_state['show_success'] = False; st.rerun()
             c1, c2 = st.columns(2)
-            c1.button("🔙 返回 / 暫停作業", use_container_width=True, key="back-btn", on_click=lambda: st.session_state.update({'current_channel': "", 'current_batch_id': ""}))
-            c2.button("🛑 結束 / 進行關單", use_container_width=True, key="close-btn", on_click=lambda: (conn := get_db_connection(), conn.execute("UPDATE return_batches SET status = '已完成' WHERE batch_id = ?", (st.session_state['current_batch_id'],)), conn.commit(), conn.close(), st.session_state.update({'current_channel': "", 'current_batch_id': ""}), st.rerun()))
+            
+            # 返回按鈕
+            if c1.button("🔙 返回 / 暫停作業", use_container_width=True, key="back-btn"):
+                st.session_state.update({'current_channel': "", 'current_batch_id': ""})
+                st.rerun()
+                
+            # 關單按鈕
+            if c2.button("🛑 結束 / 進行關單", use_container_width=True, key="close-btn"):
+                conn = get_db_connection()
+                conn.execute("UPDATE return_batches SET status = '已完成' WHERE batch_id = ?", (st.session_state['current_batch_id'],))
+                conn.commit()
+                conn.close()
+                st.session_state.update({'current_channel': "", 'current_batch_id': ""})
+                st.rerun()
 
     with tabs[1]:
         st.header("🔍 歷史紀錄查詢與異常修正")
