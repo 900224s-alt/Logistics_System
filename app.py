@@ -69,23 +69,23 @@ def get_tw_now():
  except: st.error("❌ 姓名已被註冊。") 
  finally: conn.close() 
  else: 
- st.sidebar.write(f"👤 作業員：**{st.session_state['username']}**") 
- st.sidebar.write(f"🎖️ 權限：**{'管理者' if st.session_state.get('is_admin') else '一般用戶'}**") 
+  st.sidebar.write(f"👤 作業員：**{st.session_state['username']}**") 
+  st.sidebar.write(f"🎖️ 權限：**{'管理者' if st.session_state.get('is_admin') else '一般用戶'}**") 
  if st.sidebar.button("登出系統"): st.session_state.clear(); st.rerun() 
- tabs = st.tabs(["📦 退貨點收作業", "🔍 歷史紀錄與更正", "🔔 主管審核工作台", "👥 員工權限維護"]) 
+  tabs = st.tabs(["📦 退貨點收作業", "🔍 歷史紀錄與更正", "🔔 主管審核工作台", "👥 員工權限維護"]) 
  
  with tabs[0]: 
  if not st.session_state.get('current_batch_id'): 
- st.subheader("🚀 請設定本次作業環境與通路") 
- conn = get_db_connection() 
- unfinished = conn.execute("SELECT batch_id, channel FROM return_batches WHERE status = '作業中'").fetchall() 
+  st.subheader("🚀 請設定本次作業環境與通路") 
+  conn = get_db_connection() 
+  unfinished = conn.execute("SELECT batch_id, channel FROM return_batches WHERE status = '作業中'").fetchall() 
  for b in unfinished: 
  count = conn.execute("SELECT COUNT(*) FROM return_items WHERE batch_id = ?", (b['batch_id'],)).fetchone()[0] 
  if st.button(f"繼續作業：:red[{b['batch_id']}] (:red[{b['channel']}]) | 已完成 {count} 筆"): 
- st.session_state.update({'current_batch_id': b['batch_id'], 'current_channel': b['channel']}); st.rerun() 
- conn.close() 
- env = st.radio("⚙️ 作業環境", ["正式環境", "測試環境"], horizontal=True) if st.session_state.get('is_admin') else "正式環境" 
- chan = st.selectbox("🏬 選擇退貨通路", ["請選擇...", "MOMO", "寶雅", "康是美", "屈臣氏", "蝦皮", "家購", "大智通", "好市多","PCHPME","松本清","唐吉訶德"]) 
+  st.session_state.update({'current_batch_id': b['batch_id'], 'current_channel': b['channel']}); st.rerun() 
+  conn.close() 
+  env = st.radio("⚙️ 作業環境", ["正式環境", "測試環境"], horizontal=True) if st.session_state.get('is_admin') else "正式環境" 
+  chan = st.selectbox("🏬 選擇退貨通路", ["請選擇...", "MOMO", "寶雅", "康是美", "屈臣氏", "蝦皮", "家購", "大智通", "好市多","PCHPME","松本清","唐吉訶德"]) 
  if st.button("鎖定並開始作業", use_container_width=True): 
  if chan != "請選擇...": 
  today = get_tw_now().strftime("%Y%m%d") 
