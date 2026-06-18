@@ -33,6 +33,9 @@ def init_db():
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("CREATE TABLE IF NOT EXISTS users (username TEXT PRIMARY KEY, password TEXT, register_date TEXT, role TEXT)")
+    # 確保 status 欄位存在
+    try: cursor.execute("ALTER TABLE users ADD COLUMN status TEXT DEFAULT 'pending'")
+    except: pass
     cursor.execute("CREATE TABLE IF NOT EXISTS return_batches (batch_id TEXT PRIMARY KEY, channel TEXT, register_date TEXT, status TEXT)")
     cursor.execute("CREATE TABLE IF NOT EXISTS return_items (id INTEGER PRIMARY KEY AUTOINCREMENT, batch_id TEXT, barcode TEXT, return_type TEXT, expiry_date TEXT, quantity INTEGER, quality_status TEXT, damage_reason TEXT, operator TEXT, approval_status TEXT, created_at TEXT, remark TEXT)")
     cursor.execute("CREATE TABLE IF NOT EXISTS change_requests (req_id INTEGER PRIMARY KEY AUTOINCREMENT, item_id INTEGER, action TEXT, old_qty INTEGER, new_qty INTEGER, new_status TEXT, new_expiry TEXT, reason TEXT, status TEXT)")
@@ -55,8 +58,11 @@ if not st.session_state['logged_in']:
             user = conn.execute('SELECT * FROM users WHERE username = ? AND password = ?', (login_name, login_pwd)).fetchone()
             conn.close()
             if user:
-                st.session_state.update({'logged_in': True, 'username': login_name, 'is_admin': (user['role'] == "管理者" or login_name == ORIGINAL_ADMIN)})
-                st.rerun()
+                if user['status'] == 'approved':
+                    st.session_state.update({'logged_in': True, 'username': login_name, 'is_admin': (user['role'] == "管理者" or login_name == ORIGINAL_ADMIN)})
+                    st.rerun()
+                else:
+                    st.error("❌ 帳號尚未通過管理員審核，請稍候。")
     with tab2:
         reg_name = st.text_input("請輸入你的中文真實姓名", key="reg_name").strip()
         reg_pwd = st.text_input("自訂密碼", type="password", key="reg_pwd")
@@ -64,12 +70,12 @@ if not st.session_state['logged_in']:
             conn = get_db_connection()
             try:
                 role = "管理者" if reg_name == ORIGINAL_ADMIN else "一般用戶"
-                conn.execute('INSERT INTO users VALUES (?, ?, ?, ?)', (reg_name, reg_pwd, get_tw_now().strftime("%Y-%m-%d %H:%M:%S"), role))
-                conn.commit(); st.success("註冊成功！")
+                status = "approved" if reg_name == ORIGINAL_ADMIN else "pending"
+                conn.execute('INSERT INTO users (username, password, register_date, role, status) VALUES (?, ?, ?, ?, ?)', (reg_name, reg_pwd, get_tw_now().strftime("%Y-%m-%d %H:%M:%S"), role, status))
+                conn.commit(); st.success("註冊成功！請等待管理者審核。")
             except: st.error("❌ 姓名已被註冊。")
             finally: conn.close()
 else:
-    # 顯示身份與登出
     st.sidebar.write(f"👤 作業員：**{st.session_state['username']}**")
     st.sidebar.write(f"👑 職位：**{'管理者' if st.session_state.get('is_admin') else '一般用戶'}**")
     if st.sidebar.button("登出系統"): st.session_state.clear(); st.rerun()
@@ -199,26 +205,22 @@ else:
     with tabs[3]:
         st.header("👥 員工權限")
         conn = get_db_connection()
-        # 查詢資料
-        user_df = pd.read_sql_query("SELECT username as 名稱, register_date as 註冊日期時間, role as 用戶別 FROM users", conn)
+        user_df = pd.read_sql_query("SELECT username as 名稱, register_date as 註冊日期時間, role as 用戶別, status as 狀態 FROM users", conn)
         conn.close()
-        
-        # 新增編號欄位並置於最前方
         user_df.insert(0, "編號", range(1, len(user_df) + 1))
         
-        # 使用 Styler 將所有欄位（包含表頭與資料）設定為置中
         st_df = user_df.style.set_properties(**{'text-align': 'center'}) \
                              .set_table_styles([{'selector': 'th', 'props': [('text-align', 'center')]}])
         
-        # 使用 hide_index=True 隱藏 Pandas 預設的索引欄，確保只顯示我們自定義的四欄
         st.dataframe(st_df, use_container_width=True, hide_index=True)
-        
         st.divider()
         t_u = st.text_input("輸入要操作的員工名稱").strip()
-        c1, c2, c3 = st.columns(3)
-        if c1.button("🎖️ 調整為管理者"): 
+        c1, c2, c3, c4 = st.columns(4)
+        if c1.button("✅ 審核通過"): 
+            conn = get_db_connection(); conn.execute("UPDATE users SET status = 'approved' WHERE username = ?", (t_u,)); conn.commit(); conn.close(); st.rerun()
+        if c2.button("🎖️ 調整為管理者"): 
             conn = get_db_connection(); conn.execute("UPDATE users SET role = '管理者' WHERE username = ?", (t_u,)); conn.commit(); conn.close(); st.rerun()
-        if c2.button("👤 調整為一般用戶"): 
+        if c3.button("👤 調整為一般用戶"): 
             conn = get_db_connection(); conn.execute("UPDATE users SET role = '一般用戶' WHERE username = ?", (t_u,)); conn.commit(); conn.close(); st.rerun()
-        if c3.button("❌ 刪除（離職夥伴）"): 
+        if c4.button("❌ 刪除（離職夥伴）"): 
             conn = get_db_connection(); conn.execute("DELETE FROM users WHERE username = ?", (t_u,)); conn.commit(); conn.close(); st.rerun()
