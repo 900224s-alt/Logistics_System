@@ -236,16 +236,26 @@ with tabs[1]:
                                  (int(row['ID']), act, int(row['quantity']), int(n_q), "審核中"))
                 conn.commit(); conn.close(); st.success("申請已送出")
         if st.session_state.get('is_admin'):
-        with tabs[2]:
+with tabs[2]:
             st.header("🔔 主管審核工作台")
             conn = get_db_connection()
-            review_df = pd.read_sql_query("SELECT c.*, i.batch_id, i.barcode, i.operator as applicant, i.expiry_date FROM change_requests c JOIN return_items i ON c.item_id = i.id WHERE c.status = '審核中'", conn)
+            # 查詢所有審核中的請求
+            review_df = pd.read_sql_query("""
+                SELECT c.*, i.batch_id, i.barcode, i.operator as applicant, i.expiry_date 
+                FROM change_requests c 
+                JOIN return_items i ON c.item_id = i.id 
+                WHERE c.status = '審核中'
+            """, conn)
             conn.close()
             
             if not review_df.empty:
+                # 調整顯示名稱
                 display = review_df[['batch_id', 'barcode', 'action', 'old_qty', 'new_qty', 'new_status', 'new_expiry', 'reason', 'applicant']]
+                display.columns = ['單號', '商品條碼', '動作', '原數量', '新數量', '新狀態', '新效期', '原因', '申請人']
                 display.insert(0, "同意", False)
-                reviewed = st.data_editor(display, hide_index=True)
+                
+                # 讓管理者進行批量勾選
+                reviewed = st.data_editor(display, disabled=display.columns.drop("同意"), hide_index=True)
                 
                 if st.button("🟢 批量處理"):
                     conn = get_db_connection()
@@ -253,27 +263,28 @@ with tabs[1]:
                     for i, row in reviewed.iterrows():
                         if row["同意"]:
                             req = review_df.iloc[i]
+                            # 執行資料庫更新
                             if req['action'] == "刪除資料":
                                 conn.execute("DELETE FROM return_items WHERE id = ?", (int(req['item_id']),))
                             elif req['action'] == "貨況更正":
-                                conn.execute("UPDATE return_items SET quantity = quantity - ? WHERE id = ?", (int(row['新數量']), int(req['item_id'])))
-                                item = conn.execute("SELECT * FROM return_items WHERE id = ?", (int(req['item_id']),)).fetchone()
-                                conn.execute("INSERT INTO return_items (batch_id, barcode, return_type, expiry_date, quantity, quality_status, damage_reason, operator, approval_status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, '已確認', ?)", 
-                                             (item['batch_id'], item['barcode'], item['return_type'], item['expiry_date'], int(row['新數量']), str(row['新狀態']), str(req['reason']), item['operator'], get_tw_now().strftime("%Y-%m-%d %H:%M:%S")))
+                                conn.execute("UPDATE return_items SET quality_status = ? WHERE id = ?", (str(row['新狀態']), int(req['item_id'])))
                             elif req['action'] == "數量更正":
                                 conn.execute("UPDATE return_items SET quantity = ? WHERE id = ?", (int(row['新數量']), int(req['item_id'])))
                             elif req['action'] == "效期更正":
                                 conn.execute("UPDATE return_items SET expiry_date = ?, quantity = ? WHERE id = ?", (str(row['新效期']), int(row['新數量']), int(req['item_id'])))
                             
+                            # 更新審核狀態
                             conn.execute("UPDATE change_requests SET status = '已確認' WHERE req_id = ?", (int(req['req_id']),))
                             processed_count += 1
-                    conn.commit(); conn.close()
+                    
+                    conn.commit()
+                    conn.close()
                     if processed_count > 0:
-                        st.success(f"✅ 審核完成，已處理 {processed_count} 筆申請！")
-                        st.balloons()
+                        st.success(f"✅ 已處理 {processed_count} 筆申請！")
                         st.rerun()
-                else:
-                    st.info("✨ 目前沒有待審核的異常修正資料！")
+            else:
+                # 這個提示只會出現在 tabs[2] 中
+                st.info("✨ 目前沒有待審核的異常修正資料！")
 
         with tabs[3]:
             st.header("👥 員工權限")
@@ -294,6 +305,7 @@ with tabs[1]:
                 conn = get_db_connection(); conn.execute("UPDATE users SET role = '一般用戶' WHERE username = ?", (t_u,)); conn.commit(); conn.close(); st.rerun()
             if c4.button("❌ 刪除（離職夥伴）"): 
                 conn = get_db_connection(); conn.execute("DELETE FROM users WHERE username = ?", (t_u,)); conn.commit(); conn.close(); st.rerun()
+
 
 
 
