@@ -121,12 +121,14 @@ else:
 
     with tabs[0]:
         conn = get_db_connection()
+        # 只撈取「真正有過數據點收」的未完成批次
         unfinished = conn.execute("SELECT batch_id, channel FROM return_batches WHERE status = '作業中'").fetchall()
         for b in unfinished:
             if not st.session_state.get('current_batch_id'):
                 count = conn.execute("SELECT COUNT(*) FROM return_items WHERE batch_id = ?", (b['batch_id'],)).fetchone()[0]
                 if st.button(f"繼續作業：:red[{b['batch_id']}] (:red[{b['channel']}]) | 已完成 {count} 筆"):
-                    st.session_state.update({'current_batch_id': b['batch_id'], 'current_channel': b['channel']}); st.rerun()
+                    st.session_state.update({'current_batch_id': b['batch_id'], 'current_channel': b['channel']})
+                    st.rerun()
         conn.close()
 
         if not st.session_state.get('current_batch_id'):
@@ -138,14 +140,23 @@ else:
                 prefix = "T-" if env == "測試環境" else ""
                 code = CHANNEL_CODES[chan]
                 today = get_tw_now().strftime("%Y%m%d")
+                
                 conn = get_db_connection()
+                # 這裡的單號計算包含已存在以及即將建立的單，確保號碼正確不跳號
                 count = conn.execute("SELECT COUNT(*) FROM return_batches WHERE batch_id LIKE ?", (f"{prefix}{code}_{today}%",)).fetchone()[0]
                 bid = f"{prefix}{code}_{today}_{count + 1:03d}"
-                conn.execute("INSERT INTO return_batches VALUES (?, ?, ?, '作業中')", (bid, chan, today))
-                conn.commit(); conn.close()
-                st.session_state.update({'current_batch_id': bid, 'current_channel': chan}); st.rerun()
+                conn.close()
+                
+                # 【優化機制】：此處不直接寫入資料庫，先存於 session 中，等刷了第一筆貨才正式成立單號
+                st.session_state.update({
+                    'current_batch_id': bid, 
+                    'current_channel': chan,
+                    'batch_created_in_db': False,
+                    'today_date_str': today
+                })
+                st.rerun()
         else:
-            st.info(f"🏬 通路：**{st.session_state.get('current_channel')}** ｜ 🧾 批號：**{st.session_state.get('current_batch_id')}**")
+            st.info(f"🏬 通路：**{st.session_state.get('current_channel')}** ｜ 🧾 預計批號：**{st.session_state.get('current_batch_id')}**")
             b_input = st.text_input("🔍 請刷取商品條碼", key="barcode_field")
             r_type = st.radio("退貨形態", ["箱出", "散出", "組出"], horizontal=True)
             if r_type == "箱出":
@@ -164,35 +175,47 @@ else:
                 
                 conn = get_db_connection()
                 cursor = conn.cursor()
-                # 寫入資料
+                
+                # 【空單不成立優化】：當真正刷入第一筆資料時，才去資料庫動態補建 return_batches
+                if not st.session_state.get('batch_created_in_db'):
+                    # 再次防鎖定衝突，確認這筆單號尚未在資料庫被建立
+                    check_exist = conn.execute("SELECT COUNT(*) FROM return_batches WHERE batch_id = ?", (st.session_state['current_batch_id'],)).fetchone()[0]
+                    if check_exist == 0:
+                        conn.execute("INSERT INTO return_batches VALUES (?, ?, ?, '作業中')", 
+                                     (st.session_state['current_batch_id'], st.session_state['current_channel'], st.session_state['today_date_str']))
+                    st.session_state['batch_created_in_db'] = True
+                
+                # 寫入點收明細資料
                 cursor.execute("INSERT INTO return_items (batch_id, barcode, return_type, expiry_date, quantity, quality_status, damage_reason, operator, approval_status, created_at, remark) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (st.session_state['current_batch_id'], b_input, r_type, exp_date, qty, qual, reason, st.session_state['username'], '已確認', get_tw_now().strftime("%Y-%m-%d %H:%M:%S"), remark))
                 
-                # 【新增核心需求】：獲取剛插入這筆資料的自動遞增 ID
                 new_item_id = cursor.lastrowid
-                
                 count = conn.execute("SELECT COUNT(*) FROM return_items WHERE batch_id = ?", (st.session_state['current_batch_id'],)).fetchone()[0]
-                conn.commit(); conn.close()
+                conn.commit()
+                conn.close()
                 
-                # 將 ID 與完成筆數存進 session_state
                 st.session_state['last_item_id'] = new_item_id
                 st.session_state['last_count'] = count
-                st.session_state['show_success'] = True
+                st.toast(f"🎉 儲存成功！ID: {new_item_id}") # 使用不干擾頁面刷新的小提示
             
-            if st.session_state.get('show_success'):
-                # 【修改提示框】：加入剛生成的該筆 ID 資訊
-                st.warning(f"✅ 儲存成功！該筆資料 ID 為：:blue[**{st.session_state.get('last_item_id')}**] ｜ 目前本單已完成：{st.session_state.get('last_count')} 筆")
-                if st.button("確認"): st.session_state['show_success'] = False; st.rerun()
+            # 點收成功提示區塊 (移除了內部的 st.rerun()，改用直接顯示，杜絕閃退切換問題)
+            if st.session_state.get('last_item_id'):
+                st.success(f"✅ 上一筆儲存成功！該筆資料 ID 為：:blue[**{st.session_state.get('last_item_id')}**] ｜ 目前本單已累積：{st.session_state.get('last_count')} 筆")
+            
+            st.divider()
             c1, c2 = st.columns(2)
             
             if c1.button("🔙 返回 / 暫停作業", use_container_width=True, key="back-btn"):
-                st.session_state.update({'current_channel': "", 'current_batch_id': ""})
+                st.session_state.update({'current_channel': "", 'current_batch_id': "", 'last_item_id': None, 'last_count': None})
                 st.rerun()
                 
             if c2.button("🛑 結束 / 進行關單", use_container_width=True, key="close-btn"):
                 conn = get_db_connection()
-                conn.execute("UPDATE return_batches SET status = '已完成' WHERE batch_id = ?", (st.session_state['current_batch_id'],))
-                conn.commit(); conn.close()
-                st.session_state.update({'current_channel': "", 'current_batch_id': ""})
+                # 只有當資料庫有建立該批次時（代表有數據），才更新為已完成
+                if st.session_state.get('batch_created_in_db'):
+                    conn.execute("UPDATE return_batches SET status = '已完成' WHERE batch_id = ?", (st.session_state['current_batch_id'],))
+                    conn.commit()
+                conn.close()
+                st.session_state.update({'current_channel': "", 'current_batch_id': "", 'last_item_id': None, 'last_count': None})
                 st.rerun()
 
     with tabs[1]:
@@ -239,7 +262,7 @@ else:
                     st.session_state['df'] = df
                 else:
                     st.session_state['df'] = pd.DataFrame()
-                    st.warning("查查無符合條件的資料")
+                    st.warning("查無符合條件的資料")
                 conn.close()
         
         if 'df' in st.session_state and not st.session_state['df'].empty:
@@ -256,7 +279,7 @@ else:
                                  (int(row['ID']), act, int(row['數量']), int(n_q), "審核中"))
                 conn.commit(); conn.close(); st.success("申請已送出，待主管審核")
 
-    # --- 管理員分頁 (正確縮排與封裝，警告訊息不再亂跑) ---
+    # --- 管理員分頁 (封裝隔離，警告訊息不再亂跑與引發閃退) ---
     if st.session_state.get('is_admin'):
         with tabs[2]:
             st.header("🔔 主管審核工作台")
@@ -286,7 +309,8 @@ else:
                     conn.commit(); conn.close()
                     if processed_count > 0:
                         st.success(f"✅ 審核完成，已處理 {processed_count} 筆申請！")
-                        st.balloons(); st.rerun()
+                        st.balloons()
+                        st.rerun()
             else:
                 st.info("✨ 目前沒有待審核的異常修正資料！")
 
@@ -308,4 +332,3 @@ else:
                 conn = get_db_connection(); conn.execute("UPDATE users SET role = '一般用戶' WHERE username = ?", (t_u,)); conn.commit(); conn.close(); st.rerun()
             if c4.button("❌ 刪除（離職夥伴）"): 
                 conn = get_db_connection(); conn.execute("DELETE FROM users WHERE username = ?", (t_u,)); conn.commit(); conn.close(); st.rerun()
-            
