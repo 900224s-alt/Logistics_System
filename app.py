@@ -163,13 +163,24 @@ else:
                         st.warning(f"⚠️ 條碼 {b_input} 提醒：{alert}")
                 
                 conn = get_db_connection()
-                conn.execute("INSERT INTO return_items (batch_id, barcode, return_type, expiry_date, quantity, quality_status, damage_reason, operator, approval_status, created_at, remark) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (st.session_state['current_batch_id'], b_input, r_type, exp_date, qty, qual, reason, st.session_state['username'], '已確認', get_tw_now().strftime("%Y-%m-%d %H:%M:%S"), remark))
+                cursor = conn.cursor()
+                # 寫入資料
+                cursor.execute("INSERT INTO return_items (batch_id, barcode, return_type, expiry_date, quantity, quality_status, damage_reason, operator, approval_status, created_at, remark) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (st.session_state['current_batch_id'], b_input, r_type, exp_date, qty, qual, reason, st.session_state['username'], '已確認', get_tw_now().strftime("%Y-%m-%d %H:%M:%S"), remark))
+                
+                # 【新增核心需求】：獲取剛插入這筆資料的自動遞增 ID
+                new_item_id = cursor.lastrowid
+                
                 count = conn.execute("SELECT COUNT(*) FROM return_items WHERE batch_id = ?", (st.session_state['current_batch_id'],)).fetchone()[0]
                 conn.commit(); conn.close()
-                st.session_state['last_count'] = count; st.session_state['show_success'] = True
+                
+                # 將 ID 與完成筆數存進 session_state
+                st.session_state['last_item_id'] = new_item_id
+                st.session_state['last_count'] = count
+                st.session_state['show_success'] = True
             
             if st.session_state.get('show_success'):
-                st.warning(f"✅ 儲存成功！目前本單已完成：{st.session_state.get('last_count')} 筆")
+                # 【修改提示框】：加入剛生成的該筆 ID 資訊
+                st.warning(f"✅ 儲存成功！該筆資料 ID 為：:blue[**{st.session_state.get('last_item_id')}**] ｜ 目前本單已完成：{st.session_state.get('last_count')} 筆")
                 if st.button("確認"): st.session_state['show_success'] = False; st.rerun()
             c1, c2 = st.columns(2)
             
@@ -228,7 +239,7 @@ else:
                     st.session_state['df'] = df
                 else:
                     st.session_state['df'] = pd.DataFrame()
-                    st.warning("查無符合條件的資料")
+                    st.warning("查查無符合條件的資料")
                 conn.close()
         
         if 'df' in st.session_state and not st.session_state['df'].empty:
@@ -297,3 +308,4 @@ else:
                 conn = get_db_connection(); conn.execute("UPDATE users SET role = '一般用戶' WHERE username = ?", (t_u,)); conn.commit(); conn.close(); st.rerun()
             if c4.button("❌ 刪除（離職夥伴）"): 
                 conn = get_db_connection(); conn.execute("DELETE FROM users WHERE username = ?", (t_u,)); conn.commit(); conn.close(); st.rerun()
+            
