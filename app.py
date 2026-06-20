@@ -196,7 +196,6 @@ with tabs[1]:
             else:
                 env_filter = "正式"
             
-            # --- 篩選欄位 ---
             c1, c2 = st.columns(2)
             s_start = c1.date_input("開始日期", None)
             s_end = c2.date_input("結束日期", None)
@@ -205,56 +204,63 @@ with tabs[1]:
             s_barcode = c3.text_input("商品條碼 (包含篩選)")
             s_operator = c4.text_input("作業員")
             s_type = c5.multiselect("形態", ["箱出", "散出", "組出"])
+            c6, c7 = st.columns(2)
+            s_channel = c6.multiselect("通路", list(CHANNEL_CODES.keys()))
+            s_quality = c7.multiselect("貨況", ["良品", "不良品"])
             
             if st.button("執行查詢"):
                 conn = get_db_connection()
                 query = "SELECT i.id, i.created_at, b.channel, i.batch_id, i.barcode, i.return_type, i.expiry_date, i.quantity, i.quality_status, i.damage_reason, i.operator FROM return_items i LEFT JOIN return_batches b ON i.batch_id = b.batch_id WHERE 1=1"
                 params = []
                 
-                # 環境篩選邏輯
                 if env_filter == "正式": query += " AND i.batch_id NOT LIKE 'T-%'"
                 elif env_filter == "測試": query += " AND i.batch_id LIKE 'T-%'"
                 
                 if s_batch: query += " AND i.batch_id LIKE ?"; params.append(f"%{s_batch}%")
                 if s_barcode: query += " AND i.barcode LIKE ?"; params.append(f"%{s_barcode}%")
+                if s_operator: query += " AND i.operator LIKE ?"; params.append(f"%{s_operator}%")
+                if s_type: query += " AND i.return_type IN (" + ",".join(["?"]*len(s_type)) + ")"; params.extend(s_type)
                 
                 df = pd.read_sql_query(query, conn, params=params)
-                df['ID'] = df['id']
-                st.session_state['df'] = df
+                if not df.empty:
+                    df['FullDate'] = pd.to_datetime(df['created_at'])
+                    df['日期'] = df['FullDate'].dt.strftime('%Y-%m-%d')
+                    df['時間'] = df['FullDate'].dt.strftime('%H:%M:%S')
+                    df = df.rename(columns={'id': 'ID', 'channel': '通路', 'batch_id': '批號', 'barcode': '條碼', 'return_type': '形態', 'expiry_date': '效期', 'quantity': '數量', 'quality_status': '貨況', 'damage_reason': '原因', 'operator': '作業員'})
+                    df = df[['日期', '通路', 'ID', '批號', '條碼', '形態', '效期', '數量', '貨況', '原因', '作業員', '時間']]
+                    df.insert(0, "選取", False)
+                    st.session_state['df'] = df
+                else:
+                    st.session_state['df'] = pd.DataFrame()
+                    st.warning("查無符合條件的資料")
                 conn.close()
         
-        # 顯示結果與申請
         if 'df' in st.session_state and not st.session_state['df'].empty:
             edited_df = st.data_editor(st.session_state['df'], hide_index=True)
             selected = edited_df[edited_df.get("選取", False) == True]
+            
             act = st.selectbox("動作", ["數量更正", "貨況更正", "效期更正", "刪除資料"])
             n_q = st.number_input("新數量", step=1) if act != "刪除資料" else 0
+            
             if st.button("⚠️ 送出申請"):
                 conn = get_db_connection()
                 for _, row in selected.iterrows():
                     conn.execute("INSERT INTO change_requests (item_id, action, old_qty, new_qty, status) VALUES (?, ?, ?, ?, ?)", 
-                                 (int(row['ID']), act, int(row['quantity']), int(n_q), "審核中"))
-                conn.commit(); conn.close(); st.success("申請已送出")
-        if st.session_state.get('is_admin'):
-    with tabs[2]:
+                                 (int(row['ID']), act, int(row['數量']), int(n_q), "審核中"))
+                conn.commit(); conn.close(); st.success("申請已送出，待主管審核")
+
+    # --- 把管理員分頁完整移到 tabs[1] 區塊外面 ---
+    if st.session_state.get('is_admin'):
+        with tabs[2]:
             st.header("🔔 主管審核工作台")
             conn = get_db_connection()
-            # 查詢所有審核中的請求
-            review_df = pd.read_sql_query("""
-                SELECT c.*, i.batch_id, i.barcode, i.operator as applicant, i.expiry_date 
-                FROM change_requests c 
-                JOIN return_items i ON c.item_id = i.id 
-                WHERE c.status = '審核中'
-            """, conn)
+            review_df = pd.read_sql_query("SELECT c.*, i.batch_id, i.barcode, i.operator as applicant, i.expiry_date FROM change_requests c JOIN return_items i ON c.item_id = i.id WHERE c.status = '審核中'", conn)
             conn.close()
             
             if not review_df.empty:
-                # 調整顯示名稱
-                display = review_df[['batch_id', 'barcode', 'action', 'old_qty', 'new_qty', 'new_status', 'new_expiry', 'reason', 'applicant']]
-                display.columns = ['單號', '商品條碼', '動作', '原數量', '新數量', '新狀態', '新效期', '原因', '申請人']
+                display = review_df[['batch_id', 'barcode', 'action', 'old_qty', 'new_qty', 'reason', 'applicant']]
+                display.columns = ['單號', '商品條碼', '動作', '原數量', '新數量', '原因', '申請人']
                 display.insert(0, "同意", False)
-                
-                # 讓管理者進行批量勾選
                 reviewed = st.data_editor(display, disabled=display.columns.drop("同意"), hide_index=True)
                 
                 if st.button("🟢 批量處理"):
@@ -263,27 +269,18 @@ with tabs[1]:
                     for i, row in reviewed.iterrows():
                         if row["同意"]:
                             req = review_df.iloc[i]
-                            # 執行資料庫更新
                             if req['action'] == "刪除資料":
                                 conn.execute("DELETE FROM return_items WHERE id = ?", (int(req['item_id']),))
-                            elif req['action'] == "貨況更正":
-                                conn.execute("UPDATE return_items SET quality_status = ? WHERE id = ?", (str(row['新狀態']), int(req['item_id'])))
                             elif req['action'] == "數量更正":
                                 conn.execute("UPDATE return_items SET quantity = ? WHERE id = ?", (int(row['新數量']), int(req['item_id'])))
-                            elif req['action'] == "效期更正":
-                                conn.execute("UPDATE return_items SET expiry_date = ?, quantity = ? WHERE id = ?", (str(row['新效期']), int(row['新數量']), int(req['item_id'])))
                             
-                            # 更新審核狀態
                             conn.execute("UPDATE change_requests SET status = '已確認' WHERE req_id = ?", (int(req['req_id']),))
                             processed_count += 1
-                    
-                    conn.commit()
-                    conn.close()
+                    conn.commit(); conn.close()
                     if processed_count > 0:
-                        st.success(f"✅ 已處理 {processed_count} 筆申請！")
-                        st.rerun()
+                        st.success(f"✅ 審核完成，已處理 {processed_count} 筆申請！")
+                        st.balloons(); st.rerun()
             else:
-                # 這個提示只會出現在 tabs[2] 中
                 st.info("✨ 目前沒有待審核的異常修正資料！")
 
         with tabs[3]:
@@ -293,7 +290,6 @@ with tabs[1]:
             conn.close()
             user_df.insert(0, "編號", range(1, len(user_df) + 1))
             st.dataframe(user_df, use_container_width=True, hide_index=True)
-         
             
             t_u = st.text_input("輸入要操作的員工名稱").strip()
             c1, c2, c3, c4 = st.columns(4)
