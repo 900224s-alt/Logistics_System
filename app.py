@@ -254,11 +254,6 @@ else:
                 display.columns = ['單號', '商品條碼', '動作', '原數量', '新數量', '新狀態', '新效期', '原因', '申請人']
                 display.insert(0, "同意", False)
                 reviewed = st.data_editor(display, disabled=display.columns.drop("同意"), hide_index=True)
-        with tabs[2]:
-            st.header("🔔 主管審核工作台")
-            conn = get_db_connection()
-            review_df = pd.read_sql_query("SELECT c.*, i.batch_id, i.barcode, i.operator as applicant, i.expiry_date FROM change_requests c JOIN return_items i ON c.item_id = i.id WHERE c.status = '審核中'", conn)
-            conn.close()
             
             # --- 介面優化邏輯 ---
             if not review_df.empty:
@@ -321,6 +316,7 @@ else:
                 conn = get_db_connection(); conn.execute("UPDATE users SET role = '一般用戶' WHERE username = ?", (t_u,)); conn.commit(); conn.close(); st.rerun()
             if c4.button("❌ 刪除（離職夥伴）"): 
                 conn = get_db_connection(); conn.execute("DELETE FROM users WHERE username = ?", (t_u,)); conn.commit(); conn.close(); st.rerun()
+
 
 
 
