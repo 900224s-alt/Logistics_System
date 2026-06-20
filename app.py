@@ -250,7 +250,7 @@ with tabs[1]:
                 conn.commit(); conn.close(); st.success("申請已送出，待主管審核")
 
     # --- 把管理員分頁完整移到 tabs[1] 區塊外面 ---
-    if st.session_state.get('is_admin'):
+        if st.session_state.get('is_admin'):
         with tabs[2]:
             st.header("🔔 主管審核工作台")
             conn = get_db_connection()
@@ -301,6 +301,7 @@ with tabs[1]:
                 conn = get_db_connection(); conn.execute("UPDATE users SET role = '一般用戶' WHERE username = ?", (t_u,)); conn.commit(); conn.close(); st.rerun()
             if c4.button("❌ 刪除（離職夥伴）"): 
                 conn = get_db_connection(); conn.execute("DELETE FROM users WHERE username = ?", (t_u,)); conn.commit(); conn.close(); st.rerun()
+
 
 
 
