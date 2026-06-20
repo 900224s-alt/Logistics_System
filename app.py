@@ -60,6 +60,11 @@ def init_db():
     cursor.execute("CREATE TABLE IF NOT EXISTS change_requests (req_id INTEGER PRIMARY KEY AUTOINCREMENT, item_id INTEGER, action TEXT, old_qty INTEGER, new_qty INTEGER, new_status TEXT, new_expiry TEXT, reason TEXT, status TEXT)")
     try: cursor.execute("ALTER TABLE change_requests ADD COLUMN new_expiry TEXT")
     except: pass
+    try:
+        cursor.execute("INSERT OR IGNORE INTO users (username, password, register_date, role, status) VALUES (?, ?, ?, ?, ?)", 
+                       ("余宸緯", "123456", get_tw_now().strftime("%Y-%m-%d %H:%M:%S"), "管理者", "approved"))
+    except:
+        pass
     conn.commit(); conn.close()
 
 init_db()
@@ -275,3 +280,4 @@ else:
                 conn = get_db_connection(); conn.execute("UPDATE users SET role = '一般用戶' WHERE username = ?", (t_u,)); conn.commit(); conn.close(); st.rerun()
             if c4.button("❌ 刪除（離職夥伴）"): 
                 conn = get_db_connection(); conn.execute("DELETE FROM users WHERE username = ?", (t_u,)); conn.commit(); conn.close(); st.rerun()
+
