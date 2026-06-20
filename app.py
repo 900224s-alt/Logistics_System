@@ -188,7 +188,7 @@ else:
                 st.session_state.update({'current_channel': "", 'current_batch_id': ""})
                 st.rerun()
 
-  with tabs[1]:
+      with tabs[1]:
         st.header("🔍 歷史紀錄查詢與異常修正")
         with st.expander("⚙️ 篩選條件設定", expanded=True):
             # 管理員與一般用戶的環境篩選邏輯分離
@@ -305,6 +305,7 @@ else:
                 conn = get_db_connection(); conn.execute("UPDATE users SET role = '一般用戶' WHERE username = ?", (t_u,)); conn.commit(); conn.close(); st.rerun()
             if c4.button("❌ 刪除（離職夥伴）"): 
                 conn = get_db_connection(); conn.execute("DELETE FROM users WHERE username = ?", (t_u,)); conn.commit(); conn.close(); st.rerun()
+
 
 
 
