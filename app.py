@@ -220,18 +220,29 @@ else:
             csv = edited_df.to_csv(index=False).encode('utf-8-sig')
             st.download_button("📥 下載 CSV", csv, "history.csv", "text/csv")
             selected = edited_df[edited_df["選取"] == True]
+           # --- 修改這一整段輸入邏輯 ---
             act = st.selectbox("動作", ["數量更正", "貨況更正", "效期更正", "刪除資料"])
-            n_q = st.number_input("新數量", step=1)
-            n_s = st.radio("新貨況", ["良品", "不良品"], horizontal=True) if act == "貨況更正" else ""
-            n_reason = ", ".join(st.multiselect("不良原因", DAMAGE_REASONS)) if act == "貨況更正" and n_s == "不良品" else ""
-            n_e = st.text_input("新效期") if act == "效期更正" else ""
+            
+            # 根據動作動態顯示輸入欄位
+            n_q, n_s, n_e, n_reason = 0, "", "", ""
+            
+            if act == "數量更正":
+                n_q = st.number_input("新數量", step=1)
+            elif act == "貨況更正":
+                n_s = st.radio("新貨況", ["良品", "不良品"], horizontal=True)
+                n_reason = ", ".join(st.multiselect("不良原因", DAMAGE_REASONS)) if n_s == "不良品" else ""
+            elif act == "效期更正":
+                n_e = st.text_input("新效期")
+                n_q = st.number_input("維持原數量 (請確認)", step=1)
+            # 如果是 "刪除資料"，這裡什麼都不用輸入
+
             if st.button("⚠️ 送出申請"):
                 conn = get_db_connection()
                 for _, row in selected.iterrows():
+                    # 刪除資料時，數量強制給 0，原因直接存動作名稱
                     conn.execute("INSERT INTO change_requests (item_id, action, old_qty, new_qty, new_status, new_expiry, reason, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", 
-                                 (int(row['ID']), act, int(row['數量']), int(n_q), n_s, n_e, n_reason if n_reason else act, "審核中"))
-                conn.commit(); conn.close(); st.warning("申請已送出")
-
+                                 (int(row['ID']), act, int(row['數量']), (n_q if act != "刪除資料" else 0), n_s, n_e, n_reason if n_reason else act, "審核中"))
+                conn.commit(); conn.close(); st.warning("申請已送出，等待主管審核")
     if st.session_state.get('is_admin'):
         with tabs[2]:
             st.header("🔔 主管審核工作台")
@@ -280,4 +291,5 @@ else:
                 conn = get_db_connection(); conn.execute("UPDATE users SET role = '一般用戶' WHERE username = ?", (t_u,)); conn.commit(); conn.close(); st.rerun()
             if c4.button("❌ 刪除（離職夥伴）"): 
                 conn = get_db_connection(); conn.execute("DELETE FROM users WHERE username = ?", (t_u,)); conn.commit(); conn.close(); st.rerun()
+
 
