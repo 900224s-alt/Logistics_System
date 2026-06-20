@@ -3,6 +3,9 @@ import sqlite3
 import pandas as pd
 from datetime import datetime, timedelta
 
+# 調整網頁版面，讓整體看起來更專業寬敞
+st.set_page_config(layout="wide")
+
 def get_tw_now():
     return datetime.utcnow() + timedelta(hours=8)
 
@@ -38,6 +41,8 @@ st.markdown("""
     div.stButton > button[kind="primary"] { background-color: #8da3b4 !important; border: none !important; color: white !important; }
     div.stButton > button#back-btn { background-color: #d4c4a8 !important; border: none !important; color: white !important; }
     div.stButton > button#close-btn { background-color: #c48b8b !important; border: none !important; color: white !important; }
+    /* 讓頂部刷新按鈕靠右對齊 */
+    .refresh-container { display: flex; justify-content: flex-end; margin-bottom: -10px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -69,7 +74,15 @@ def init_db():
 
 init_db()
 
-if 'logged_in' not in st.session_state: st.session_state['logged_in'] = False
+# --- 瀏覽器重整防護：使用 query_params 模擬不登出機制 ---
+if 'logged_in' not in st.session_state:
+    if "user" in st.query_params and "role" in st.query_params:
+        st.session_state['logged_in'] = True
+        st.session_state['username'] = st.query_params["user"]
+        st.session_state['is_admin'] = st.query_params["role"] == "admin"
+    else:
+        st.session_state['logged_in'] = False
+
 st.title("📦 物流退貨點收系統")
 
 if not st.session_state['logged_in']:
@@ -83,7 +96,11 @@ if not st.session_state['logged_in']:
             if user:
                 if user['password'] == login_pwd:
                     if login_name == ORIGINAL_ADMIN or user['status'] == 'approved':
-                        st.session_state.update({'logged_in': True, 'username': login_name, 'is_admin': (user['role'] == "管理者" or login_name == ORIGINAL_ADMIN)})
+                        is_admin_user = (user['role'] == "管理者" or login_name == ORIGINAL_ADMIN)
+                        st.session_state.update({'logged_in': True, 'username': login_name, 'is_admin': is_admin_user})
+                        # 將登入狀態寫入網址參數，即使按 F5 也不會登出
+                        st.query_params["user"] = login_name
+                        st.query_params["role"] = "admin" if is_admin_user else "user"
                         st.rerun()
                     else: st.error("❌ 您的帳號尚未通過管理員審核，請稍候。")
                 else: st.error("❌ 密碼錯誤，請重新輸入。")
@@ -102,9 +119,19 @@ if not st.session_state['logged_in']:
             except: st.error("❌ 姓名已被註冊。")
             finally: conn.close()
 else:
+    # --- 頂部右側局部刷新功能區 ---
+    col_title, col_refresh = st.columns([9, 1])
+    with col_refresh:
+        # 這個按鈕點擊後會原地觸發重新載入數據，不會洗掉狀態，也不會重定向頁面
+        if st.button("🔄 刷新數據", help="點擊此處原地更新資料庫數據，不影響目前頁面"):
+            st.toast("數據已同步至最新狀態！")
+            
     st.sidebar.write(f"👤 作業員：**{st.session_state['username']}**")
     st.sidebar.write(f"👑 職位：**{'管理者' if st.session_state.get('is_admin') else '一般用戶'}**")
-    if st.sidebar.button("登出系統"): st.session_state.clear(); st.rerun()
+    if st.sidebar.button("登出系統"): 
+        st.session_state.clear()
+        st.query_params.clear() # 清除網址參數
+        st.rerun()
     
     conn = get_db_connection()
     pending_req_count = conn.execute("SELECT COUNT(*) FROM change_requests WHERE status = '審核中'").fetchone()[0]
@@ -271,14 +298,11 @@ else:
                                  (int(row['ID']), act, int(row['數量']), int(n_q), "審核中"))
                 conn.commit(); conn.close(); st.success("申請已送出，待主管審核")
 
-    # --- 管理員分頁 (優化：原地局部重整，徹底根除按鈕閃退) ---
+    # --- 主管審核 ---
     if st.session_state.get('is_admin'):
         with tabs[2]:
             st.header("🔔 主管審核工作台")
-            
-            # 建立一個區域容器，用來做原地重新整理
             review_container = st.container()
-            
             with review_container:
                 conn = get_db_connection()
                 review_df = pd.read_sql_query("SELECT c.*, i.batch_id, i.barcode, i.operator as applicant, i.expiry_date FROM change_requests c JOIN return_items i ON c.item_id = i.id WHERE c.status = '審核中'", conn)
@@ -307,7 +331,6 @@ else:
                         
                         if processed_count > 0:
                             st.success(f"✅ 審核完成，已成功處理 {processed_count} 筆申請！")
-                            # 【核心修正】：原地刷新資料，不再使用破壞分頁狀態的全網頁 st.rerun()
                             st.empty() 
                 else:
                     st.info("✨ 目前沒有待審核的異常修正資料！")
