@@ -243,7 +243,7 @@ else:
                     conn.execute("INSERT INTO change_requests (item_id, action, old_qty, new_qty, new_status, new_expiry, reason, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", 
                                  (int(row['ID']), act, int(row['數量']), (n_q if act != "刪除資料" else 0), n_s, n_e, n_reason if n_reason else act, "審核中"))
                 conn.commit(); conn.close(); st.warning("申請已送出，等待主管審核")
-   if st.session_state.get('is_admin'):
+       if st.session_state.get('is_admin'):
         # 使用一個簡單的 session 變數來記錄當前所在的 Tab
         if 'active_tab' not in st.session_state:
             st.session_state['active_tab'] = 0
@@ -314,6 +314,7 @@ else:
                 conn = get_db_connection(); conn.execute("UPDATE users SET role = '一般用戶' WHERE username = ?", (t_u,)); conn.commit(); conn.close(); st.rerun()
             if c4.button("❌ 刪除（離職夥伴）"): 
                 conn = get_db_connection(); conn.execute("DELETE FROM users WHERE username = ?", (t_u,)); conn.commit(); conn.close(); st.rerun()
+
 
 
 
