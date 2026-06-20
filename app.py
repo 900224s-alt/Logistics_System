@@ -235,7 +235,7 @@ with tabs[1]:
                     conn.execute("INSERT INTO change_requests (item_id, action, old_qty, new_qty, status) VALUES (?, ?, ?, ?, ?)", 
                                  (int(row['ID']), act, int(row['quantity']), int(n_q), "審核中"))
                 conn.commit(); conn.close(); st.success("申請已送出")
-       if st.session_state.get('is_admin'):
+        if st.session_state.get('is_admin'):
         with tabs[2]:
             st.header("🔔 主管審核工作台")
             conn = get_db_connection()
@@ -294,6 +294,7 @@ with tabs[1]:
                 conn = get_db_connection(); conn.execute("UPDATE users SET role = '一般用戶' WHERE username = ?", (t_u,)); conn.commit(); conn.close(); st.rerun()
             if c4.button("❌ 刪除（離職夥伴）"): 
                 conn = get_db_connection(); conn.execute("DELETE FROM users WHERE username = ?", (t_u,)); conn.commit(); conn.close(); st.rerun()
+
 
 
 
