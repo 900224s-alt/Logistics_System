@@ -158,7 +158,6 @@ else:
             remark = st.text_input("備註欄")
             
             if st.button("💾 儲存並繼續新增", use_container_width=True, type="primary"):
-                # --- 新增條碼檢查邏輯 ---
                 if b_input in BARCODE_ALERTS:
                     for alert in BARCODE_ALERTS[b_input]:
                         st.warning(f"⚠️ 條碼 {b_input} 提醒：{alert}")
@@ -174,21 +173,18 @@ else:
                 if st.button("確認"): st.session_state['show_success'] = False; st.rerun()
             c1, c2 = st.columns(2)
             
-            # 返回按鈕
             if c1.button("🔙 返回 / 暫停作業", use_container_width=True, key="back-btn"):
                 st.session_state.update({'current_channel': "", 'current_batch_id': ""})
                 st.rerun()
                 
-            # 關單按鈕
             if c2.button("🛑 結束 / 進行關單", use_container_width=True, key="close-btn"):
                 conn = get_db_connection()
                 conn.execute("UPDATE return_batches SET status = '已完成' WHERE batch_id = ?", (st.session_state['current_batch_id'],))
-                conn.commit()
-                conn.close()
+                conn.commit(); conn.close()
                 st.session_state.update({'current_channel': "", 'current_batch_id': ""})
                 st.rerun()
 
-with tabs[1]:
+    with tabs[1]:
         st.header("🔍 歷史紀錄查詢與異常修正")
         with st.expander("⚙️ 篩選條件設定", expanded=True):
             if st.session_state.get('is_admin'):
@@ -249,8 +245,8 @@ with tabs[1]:
                                  (int(row['ID']), act, int(row['數量']), int(n_q), "審核中"))
                 conn.commit(); conn.close(); st.success("申請已送出，待主管審核")
 
-    # --- 把管理員分頁完整移到 tabs[1] 區塊外面 ---
-        if st.session_state.get('is_admin'):
+    # --- 管理員分頁 (正確縮排與封裝，警告訊息不再亂跑) ---
+    if st.session_state.get('is_admin'):
         with tabs[2]:
             st.header("🔔 主管審核工作台")
             conn = get_db_connection()
@@ -301,29 +297,3 @@ with tabs[1]:
                 conn = get_db_connection(); conn.execute("UPDATE users SET role = '一般用戶' WHERE username = ?", (t_u,)); conn.commit(); conn.close(); st.rerun()
             if c4.button("❌ 刪除（離職夥伴）"): 
                 conn = get_db_connection(); conn.execute("DELETE FROM users WHERE username = ?", (t_u,)); conn.commit(); conn.close(); st.rerun()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
