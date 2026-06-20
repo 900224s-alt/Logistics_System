@@ -35,7 +35,7 @@ BARCODE_ALERTS = {
     "4710155278860": ["需退回工廠商品，請額外裝箱並貼上大字報（好壞品分開放）"]
 }
 
-# --- 莫蘭迪配色設定 ---
+# --- 莫蘭迪配色與表格放大設定 ---
 st.markdown("""
 <style>
     div.stButton > button[kind="primary"] { background-color: #8da3b4 !important; border: none !important; color: white !important; }
@@ -43,6 +43,20 @@ st.markdown("""
     div.stButton > button#close-btn { background-color: #c48b8b !important; border: none !important; color: white !important; }
     /* 讓頂部刷新按鈕靠右對齊 */
     .refresh-container { display: flex; justify-content: flex-end; margin-bottom: -10px; }
+    
+    /* 【新增：強力覆蓋表格樣式】讓上下左右的索引標題、內容、下拉選單全部變大且醒目 */
+    [data-testid="stDataEditor"] *, [data-testid="stDataFrame"] * {
+        font-size: 16px !important;
+        font-weight: 500 !important;
+    }
+    /* 強調表格的欄位標題與橫向/縱向索引 */
+    .glide-data-grid {
+        font-family: inherit !important;
+    }
+    /* 調整下拉選單與輸入框在表格內的醒目度 */
+    div[data-testid="stSelectbox"] *, div[data-testid="stNumberInput"] * {
+        font-size: 16px !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -122,7 +136,6 @@ else:
     # --- 頂部右側局部刷新功能區 ---
     col_title, col_refresh = st.columns([9, 1])
     with col_refresh:
-        # 這個按鈕點擊後會原地觸發重新載入數據，不會洗掉狀態，也不會重定向頁面
         if st.button("🔄 刷新數據", help="點擊此處原地更新資料庫數據，不影響目前頁面"):
             st.toast("數據已同步至最新狀態！")
             
