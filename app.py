@@ -121,7 +121,6 @@ else:
 
     with tabs[0]:
         conn = get_db_connection()
-        # 只撈取「真正有過數據點收」的未完成批次
         unfinished = conn.execute("SELECT batch_id, channel FROM return_batches WHERE status = '作業中'").fetchall()
         for b in unfinished:
             if not st.session_state.get('current_batch_id'):
@@ -142,12 +141,10 @@ else:
                 today = get_tw_now().strftime("%Y%m%d")
                 
                 conn = get_db_connection()
-                # 這裡的單號計算包含已存在以及即將建立的單，確保號碼正確不跳號
                 count = conn.execute("SELECT COUNT(*) FROM return_batches WHERE batch_id LIKE ?", (f"{prefix}{code}_{today}%",)).fetchone()[0]
                 bid = f"{prefix}{code}_{today}_{count + 1:03d}"
                 conn.close()
                 
-                # 【優化機制】：此處不直接寫入資料庫，先存於 session 中，等刷了第一筆貨才正式成立單號
                 st.session_state.update({
                     'current_batch_id': bid, 
                     'current_channel': chan,
@@ -176,16 +173,13 @@ else:
                 conn = get_db_connection()
                 cursor = conn.cursor()
                 
-                # 【空單不成立優化】：當真正刷入第一筆資料時，才去資料庫動態補建 return_batches
                 if not st.session_state.get('batch_created_in_db'):
-                    # 再次防鎖定衝突，確認這筆單號尚未在資料庫被建立
                     check_exist = conn.execute("SELECT COUNT(*) FROM return_batches WHERE batch_id = ?", (st.session_state['current_batch_id'],)).fetchone()[0]
                     if check_exist == 0:
                         conn.execute("INSERT INTO return_batches VALUES (?, ?, ?, '作業中')", 
                                      (st.session_state['current_batch_id'], st.session_state['current_channel'], st.session_state['today_date_str']))
                     st.session_state['batch_created_in_db'] = True
                 
-                # 寫入點收明細資料
                 cursor.execute("INSERT INTO return_items (batch_id, barcode, return_type, expiry_date, quantity, quality_status, damage_reason, operator, approval_status, created_at, remark) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (st.session_state['current_batch_id'], b_input, r_type, exp_date, qty, qual, reason, st.session_state['username'], '已確認', get_tw_now().strftime("%Y-%m-%d %H:%M:%S"), remark))
                 
                 new_item_id = cursor.lastrowid
@@ -195,9 +189,8 @@ else:
                 
                 st.session_state['last_item_id'] = new_item_id
                 st.session_state['last_count'] = count
-                st.toast(f"🎉 儲存成功！ID: {new_item_id}") # 使用不干擾頁面刷新的小提示
+                st.toast(f"🎉 儲存成功！ID: {new_item_id}")
             
-            # 點收成功提示區塊 (移除了內部的 st.rerun()，改用直接顯示，杜絕閃退切換問題)
             if st.session_state.get('last_item_id'):
                 st.success(f"✅ 上一筆儲存成功！該筆資料 ID 為：:blue[**{st.session_state.get('last_item_id')}**] ｜ 目前本單已累積：{st.session_state.get('last_count')} 筆")
             
@@ -210,7 +203,6 @@ else:
                 
             if c2.button("🛑 結束 / 進行關單", use_container_width=True, key="close-btn"):
                 conn = get_db_connection()
-                # 只有當資料庫有建立該批次時（代表有數據），才更新為已完成
                 if st.session_state.get('batch_created_in_db'):
                     conn.execute("UPDATE return_batches SET status = '已完成' WHERE batch_id = ?", (st.session_state['current_batch_id'],))
                     conn.commit()
@@ -279,40 +271,46 @@ else:
                                  (int(row['ID']), act, int(row['數量']), int(n_q), "審核中"))
                 conn.commit(); conn.close(); st.success("申請已送出，待主管審核")
 
-    # --- 管理員分頁 (封裝隔離，警告訊息不再亂跑與引發閃退) ---
+    # --- 管理員分頁 (優化：原地局部重整，徹底根除按鈕閃退) ---
     if st.session_state.get('is_admin'):
         with tabs[2]:
             st.header("🔔 主管審核工作台")
-            conn = get_db_connection()
-            review_df = pd.read_sql_query("SELECT c.*, i.batch_id, i.barcode, i.operator as applicant, i.expiry_date FROM change_requests c JOIN return_items i ON c.item_id = i.id WHERE c.status = '審核中'", conn)
-            conn.close()
             
-            if not review_df.empty:
-                display = review_df[['batch_id', 'barcode', 'action', 'old_qty', 'new_qty', 'reason', 'applicant']]
-                display.columns = ['單號', '商品條碼', '動作', '原數量', '新數量', '原因', '申請人']
-                display.insert(0, "同意", False)
-                reviewed = st.data_editor(display, disabled=display.columns.drop("同意"), hide_index=True)
+            # 建立一個區域容器，用來做原地重新整理
+            review_container = st.container()
+            
+            with review_container:
+                conn = get_db_connection()
+                review_df = pd.read_sql_query("SELECT c.*, i.batch_id, i.barcode, i.operator as applicant, i.expiry_date FROM change_requests c JOIN return_items i ON c.item_id = i.id WHERE c.status = '審核中'", conn)
+                conn.close()
                 
-                if st.button("🟢 批量處理"):
-                    conn = get_db_connection()
-                    processed_count = 0
-                    for i, row in reviewed.iterrows():
-                        if row["同意"]:
-                            req = review_df.iloc[i]
-                            if req['action'] == "刪除資料":
-                                conn.execute("DELETE FROM return_items WHERE id = ?", (int(req['item_id']),))
-                            elif req['action'] == "數量更正":
-                                conn.execute("UPDATE return_items SET quantity = ? WHERE id = ?", (int(row['新數量']), int(req['item_id'])))
-                            
-                            conn.execute("UPDATE change_requests SET status = '已確認' WHERE req_id = ?", (int(req['req_id']),))
-                            processed_count += 1
-                    conn.commit(); conn.close()
-                    if processed_count > 0:
-                        st.success(f"✅ 審核完成，已處理 {processed_count} 筆申請！")
-                        st.balloons()
-                        st.rerun()
-            else:
-                st.info("✨ 目前沒有待審核的異常修正資料！")
+                if not review_df.empty:
+                    display = review_df[['batch_id', 'barcode', 'action', 'old_qty', 'new_qty', 'reason', 'applicant']]
+                    display.columns = ['單號', '商品條碼', '動作', '原數量', '新數量', '原因', '申請人']
+                    display.insert(0, "同意", False)
+                    reviewed = st.data_editor(display, disabled=display.columns.drop("同意"), hide_index=True, key="admin_review_editor")
+                    
+                    if st.button("🟢 批量處理"):
+                        conn = get_db_connection()
+                        processed_count = 0
+                        for i, row in reviewed.iterrows():
+                            if row["同意"]:
+                                req = review_df.iloc[i]
+                                if req['action'] == "刪除資料":
+                                    conn.execute("DELETE FROM return_items WHERE id = ?", (int(req['item_id']),))
+                                elif req['action'] == "數量更正":
+                                    conn.execute("UPDATE return_items SET quantity = ? WHERE id = ?", (int(row['新數量']), int(req['item_id'])))
+                                
+                                conn.execute("UPDATE change_requests SET status = '已確認' WHERE req_id = ?", (int(req['req_id']),))
+                                processed_count += 1
+                        conn.commit(); conn.close()
+                        
+                        if processed_count > 0:
+                            st.success(f"✅ 審核完成，已成功處理 {processed_count} 筆申請！")
+                            # 【核心修正】：原地刷新資料，不再使用破壞分頁狀態的全網頁 st.rerun()
+                            st.empty() 
+                else:
+                    st.info("✨ 目前沒有待審核的異常修正資料！")
 
         with tabs[3]:
             st.header("👥 員工權限")
