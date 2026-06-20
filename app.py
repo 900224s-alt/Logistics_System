@@ -32,7 +32,7 @@ BARCODE_ALERTS = {
     "4710155285912": ["需退回工廠商品，請額外裝箱並貼上大字報（好壞品分開放）"],
     "4710155278921": ["需退回工廠商品，請額外裝箱並貼上大字報（好壞品分開放）"],
     "4710155282386": ["需退回工廠商品，請額外裝箱並貼上大字報（好壞品分開放）"],
-    "4710155278860": ["需退回工廠商品，請額外裝箱並貼上大字報（好壞品分開放）"]
+    "4710155278860": ["需退回工廠商品 bubble（好壞品分開放）"]
 }
 
 # --- 莫蘭迪配色與表格放大設定 ---
@@ -44,16 +44,14 @@ st.markdown("""
     /* 讓頂部刷新按鈕靠右對齊 */
     .refresh-container { display: flex; justify-content: flex-end; margin-bottom: -10px; }
     
-    /* 【新增：強力覆蓋表格樣式】讓上下左右的索引標題、內容、下拉選單全部變大且醒目 */
+    /* 表格樣式優化：讓上下左右的索引標題、內容、下拉選單全部變大且醒目 */
     [data-testid="stDataEditor"] *, [data-testid="stDataFrame"] * {
         font-size: 16px !important;
         font-weight: 500 !important;
     }
-    /* 強調表格的欄位標題與橫向/縱向索引 */
     .glide-data-grid {
         font-family: inherit !important;
     }
-    /* 調整下拉選單與輸入框在表格內的醒目度 */
     div[data-testid="stSelectbox"] *, div[data-testid="stNumberInput"] * {
         font-size: 16px !important;
     }
@@ -88,7 +86,7 @@ def init_db():
 
 init_db()
 
-# --- 瀏覽器重整防護：使用 query_params 模擬不登出機制 ---
+# --- 瀏覽器重整防護 ---
 if 'logged_in' not in st.session_state:
     if "user" in st.query_params and "role" in st.query_params:
         st.session_state['logged_in'] = True
@@ -112,7 +110,6 @@ if not st.session_state['logged_in']:
                     if login_name == ORIGINAL_ADMIN or user['status'] == 'approved':
                         is_admin_user = (user['role'] == "管理者" or login_name == ORIGINAL_ADMIN)
                         st.session_state.update({'logged_in': True, 'username': login_name, 'is_admin': is_admin_user})
-                        # 將登入狀態寫入網址參數，即使按 F5 也不會登出
                         st.query_params["user"] = login_name
                         st.query_params["role"] = "admin" if is_admin_user else "user"
                         st.rerun()
@@ -143,7 +140,7 @@ else:
     st.sidebar.write(f"👑 職位：**{'管理者' if st.session_state.get('is_admin') else '一般用戶'}**")
     if st.sidebar.button("登出系統"): 
         st.session_state.clear()
-        st.query_params.clear() # 清除網址參數
+        st.query_params.clear()
         st.rerun()
     
     conn = get_db_connection()
@@ -298,9 +295,24 @@ else:
                 conn.close()
         
         if 'df' in st.session_state and not st.session_state['df'].empty:
-            edited_df = st.data_editor(st.session_state['df'], hide_index=True)
+            # 【優化：強制唯讀】使用 disabled 參數，將除了 "選取" 欄位之外的所有欄位全部鎖死
+            all_cols = st.session_state['df'].columns
+            disabled_cols = [c for c in all_cols if c != "選取"]
+            
+            edited_df = st.data_editor(st.session_state['df'], disabled=disabled_cols, hide_index=True)
             selected = edited_df[edited_df.get("選取", False) == True]
             
+            # 【新增功能：匯出 CSV 報表】
+            csv_data = st.session_state['df'].to_csv(index=False).encode('utf-8-sig')
+            st.download_button(
+                label="📥 下載目前查詢表格為 CSV",
+                data=csv_data,
+                file_name=f"退貨點收紀錄_{get_tw_now().strftime('%Y%m%d_%H%M%S')}.csv",
+                mime="text/csv",
+                key="download_history_csv"
+            )
+            
+            st.divider()
             act = st.selectbox("動作", ["數量更正", "貨況更正", "效期更正", "刪除資料"])
             n_q = st.number_input("新數量", step=1) if act != "刪除資料" else 0
             
@@ -325,7 +337,20 @@ else:
                     display = review_df[['batch_id', 'barcode', 'action', 'old_qty', 'new_qty', 'reason', 'applicant']]
                     display.columns = ['單號', '商品條碼', '動作', '原數量', '新數量', '原因', '申請人']
                     display.insert(0, "同意", False)
-                    reviewed = st.data_editor(display, disabled=display.columns.drop("同意"), hide_index=True, key="admin_review_editor")
+                    
+                    # 【優化：強制唯讀】不論身分，除了主管點選的 "同意" 欄位外，其他欄位一律鎖死
+                    admin_disabled_cols = [c for c in display.columns if c != "同意"]
+                    reviewed = st.data_editor(display, disabled=admin_disabled_cols, hide_index=True, key="admin_review_editor")
+                    
+                    # 【新增功能：匯出待審核清單 CSV】
+                    review_csv = display.to_csv(index=False).encode('utf-8-sig')
+                    st.download_button(
+                        label="📥 下載待審核清單為 CSV",
+                        data=review_csv,
+                        file_name=f"待主管審核清單_{get_tw_now().strftime('%Y%m%d')}.csv",
+                        mime="text/csv",
+                        key="download_review_csv"
+                    )
                     
                     if st.button("🟢 批量處理"):
                         conn = get_db_connection()
