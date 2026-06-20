@@ -188,14 +188,14 @@ else:
                 st.session_state.update({'current_channel': "", 'current_batch_id': ""})
                 st.rerun()
 
-    with tabs[1]:
+  with tabs[1]:
         st.header("🔍 歷史紀錄查詢與異常修正")
         with st.expander("⚙️ 篩選條件設定", expanded=True):
-            # 管理員與一般用戶的環境篩選邏輯分離
+            # 管理員篩選環境
             if st.session_state.get('is_admin'):
                 env_filter = st.radio("環境篩選", ["正式", "測試", "All"], horizontal=True)
             else:
-                env_filter = "正式" # 一般用戶強制篩選正式環境
+                env_filter = "正式" # 一般用戶鎖定正式
             
             c1, c2 = st.columns(2)
             s_start = c1.date_input("開始日期", None)
@@ -205,36 +205,23 @@ else:
             s_barcode = c3.text_input("商品條碼 (包含篩選)")
             s_operator = c4.text_input("作業員")
             s_type = c5.multiselect("形態", ["箱出", "散出", "組出"])
-            c6, c7 = st.columns(2)
-            s_channel = c6.multiselect("通路", list(CHANNEL_CODES.keys()))
-            s_quality = c7.multiselect("貨況", ["良品", "不良品"])
             
             if st.button("執行查詢"):
                 conn = get_db_connection()
+                # 處理環境 SQL
+                env_clause = ""
+                if env_filter == "正式": env_clause = "AND i.batch_id NOT LIKE 'T-%'"
+                elif env_filter == "測試": env_clause = "AND i.batch_id LIKE 'T-%'"
                 
-                # 動態 SQL 構建
-                query = "SELECT i.id, i.created_at, b.channel, i.batch_id, i.barcode, i.return_type, i.expiry_date, i.quantity, i.quality_status, i.damage_reason, i.operator FROM return_items i LEFT JOIN return_batches b ON i.batch_id = b.batch_id WHERE 1=1"
-                params = []
-                
-                # 處理環境篩選 (管理員才有權限切換，一般用戶鎖定正式)
-                if env_filter == "正式": query += " AND i.batch_id NOT LIKE 'T-%'"
-                elif env_filter == "測試": query += " AND i.batch_id LIKE 'T-%'"
-                
-                # 模糊查詢邏輯
-                if s_batch: query += " AND i.batch_id LIKE ?"; params.append(f"%{s_batch}%")
-                if s_barcode: query += " AND i.barcode LIKE ?"; params.append(f"%{s_barcode}%")
-                if s_operator: query += " AND i.operator LIKE ?"; params.append(f"%{s_operator}%")
-                if s_type: query += " AND i.return_type IN (" + ",".join(["?"]*len(s_type)) + ")"; params.extend(s_type)
-                
-                df = pd.read_sql_query(query, conn, params=params)
-                df['ID'] = df['id'] # 保持顯示 ID
+                query = f"SELECT i.id, i.created_at, b.channel, i.batch_id, i.barcode, i.return_type, i.expiry_date, i.quantity, i.quality_status, i.damage_reason, i.operator FROM return_items i LEFT JOIN return_batches b ON i.batch_id = b.batch_id WHERE 1=1 {env_clause} AND i.batch_id LIKE ? AND i.barcode LIKE ?"
+                df = pd.read_sql_query(query, conn, params=[f"%{s_batch}%", f"%{s_barcode}%"])
+                df['ID'] = df['id']
                 st.session_state['df'] = df
                 conn.close()
         
         if 'df' in st.session_state and not st.session_state['df'].empty:
             edited_df = st.data_editor(st.session_state['df'], hide_index=True)
             selected = edited_df[edited_df.get("選取", False) == True]
-            
             act = st.selectbox("動作", ["數量更正", "貨況更正", "效期更正", "刪除資料"])
             n_q = st.number_input("新數量", step=1) if act != "刪除資料" else 0
             
@@ -245,17 +232,17 @@ else:
                                  (int(row['ID']), act, int(row['quantity']), int(n_q), "審核中"))
                 conn.commit(); conn.close(); st.success("申請已送出，待主管審核")
                 
-        if st.session_state.get('is_admin'):
-                st.header("🔔 主管審核工作台")
-                    conn = get_db_connection()
-                    review_df = pd.read_sql_query("SELECT c.*, i.batch_id, i.barcode, i.operator as applicant, i.expiry_date FROM change_requests c JOIN return_items i ON c.item_id = i.id WHERE c.status = '審核中'", conn)
-                    conn.close()
+       if st.session_state.get('is_admin'):
+        with tabs[2]:
+            st.header("🔔 主管審核工作台")
+            conn = get_db_connection()
+            review_df = pd.read_sql_query("SELECT c.*, i.batch_id, i.barcode, i.operator as applicant, i.expiry_date FROM change_requests c JOIN return_items i ON c.item_id = i.id WHERE c.status = '審核中'", conn)
+            conn.close()
             
-                if not review_df.empty:
-                    display = review_df[['batch_id', 'barcode', 'action', 'old_qty', 'new_qty', 'new_status', 'new_expiry', 'reason', 'applicant']]
-                    display.columns = ['單號', '商品條碼', '動作', '原數量', '新數量', '新狀態', '新效期', '原因', '申請人']
-                    display.insert(0, "同意", False)
-                    reviewed = st.data_editor(display, disabled=display.columns.drop("同意"), hide_index=True)
+            if not review_df.empty:
+                display = review_df[['batch_id', 'barcode', 'action', 'old_qty', 'new_qty', 'new_status', 'new_expiry', 'reason', 'applicant']]
+                display.insert(0, "同意", False)
+                reviewed = st.data_editor(display, hide_index=True)
                 
                 if st.button("🟢 批量處理"):
                     conn = get_db_connection()
@@ -304,6 +291,7 @@ else:
                 conn = get_db_connection(); conn.execute("UPDATE users SET role = '一般用戶' WHERE username = ?", (t_u,)); conn.commit(); conn.close(); st.rerun()
             if c4.button("❌ 刪除（離職夥伴）"): 
                 conn = get_db_connection(); conn.execute("DELETE FROM users WHERE username = ?", (t_u,)); conn.commit(); conn.close(); st.rerun()
+
 
 
 
