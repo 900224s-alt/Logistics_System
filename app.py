@@ -246,10 +246,10 @@ else:
                 conn.commit(); conn.close(); st.success("申請已送出，待主管審核")
                 
         if st.session_state.get('is_admin'):
-            st.header("🔔 主管審核工作台")
-                conn = get_db_connection()
-                review_df = pd.read_sql_query("SELECT c.*, i.batch_id, i.barcode, i.operator as applicant, i.expiry_date FROM change_requests c JOIN return_items i ON c.item_id = i.id WHERE c.status = '審核中'", conn)
-                conn.close()
+                st.header("🔔 主管審核工作台")
+                    conn = get_db_connection()
+                    review_df = pd.read_sql_query("SELECT c.*, i.batch_id, i.barcode, i.operator as applicant, i.expiry_date FROM change_requests c JOIN return_items i ON c.item_id = i.id WHERE c.status = '審核中'", conn)
+                    conn.close()
             
                 if not review_df.empty:
                     display = review_df[['batch_id', 'barcode', 'action', 'old_qty', 'new_qty', 'new_status', 'new_expiry', 'reason', 'applicant']]
@@ -304,6 +304,7 @@ else:
                 conn = get_db_connection(); conn.execute("UPDATE users SET role = '一般用戶' WHERE username = ?", (t_u,)); conn.commit(); conn.close(); st.rerun()
             if c4.button("❌ 刪除（離職夥伴）"): 
                 conn = get_db_connection(); conn.execute("DELETE FROM users WHERE username = ?", (t_u,)); conn.commit(); conn.close(); st.rerun()
+
 
 
 
