@@ -244,16 +244,9 @@ else:
                                  (int(row['ID']), act, int(row['數量']), (n_q if act != "刪除資料" else 0), n_s, n_e, n_reason if n_reason else act, "審核中"))
                 conn.commit(); conn.close(); st.warning("申請已送出，等待主管審核")
 if st.session_state.get('is_admin'):
-        # 使用一個簡單的 session 變數來記錄當前所在的 Tab
-        if 'active_tab' not in st.session_state:
-            st.session_state['active_tab'] = 0
-
-        # 當你在 tabs 之間切換時，強制更新 session_state
-        # 注意：我們透過 index 參數來強制鎖定目前的 Tab 位置
-        tabs = st.tabs(tab_labels)
-
-        # 這裡根據 tab 的 index 渲染內容
-        with tabs[2]: # 主管審核工作台
+        # 這裡的縮排必須對齊，下面所有的 with tabs 都必須在 if 下方
+        
+        with tabs[2]:
             st.header("🔔 主管審核工作台")
             conn = get_db_connection()
             review_df = pd.read_sql_query("SELECT c.*, i.batch_id, i.barcode, i.operator as applicant, i.expiry_date FROM change_requests c JOIN return_items i ON c.item_id = i.id WHERE c.status = '審核中'", conn)
@@ -285,24 +278,22 @@ if st.session_state.get('is_admin'):
                             
                             conn.execute("UPDATE change_requests SET status = '已確認' WHERE req_id = ?", (int(req['req_id']),))
                             processed_count += 1
-                    
                     conn.commit(); conn.close()
                     if processed_count > 0:
                         st.success(f"✅ 審核完成，已處理 {processed_count} 筆申請！")
                         st.balloons()
                         st.rerun()
-                    else:
-                        st.warning("⚠️ 請先勾選要處理的項目")
             else:
                 st.info("✨ 目前沒有待審核的異常修正資料！")
 
-        with tabs[3]: # 員工權限
+        with tabs[3]:
             st.header("👥 員工權限")
             conn = get_db_connection()
             user_df = pd.read_sql_query("SELECT username as 名稱, register_date as 註冊日期時間, role as 用戶別, status as 狀態 FROM users", conn)
             conn.close()
             user_df.insert(0, "編號", range(1, len(user_df) + 1))
             st.dataframe(user_df, use_container_width=True, hide_index=True)
+         
             
             t_u = st.text_input("輸入要操作的員工名稱").strip()
             c1, c2, c3, c4 = st.columns(4)
@@ -314,6 +305,7 @@ if st.session_state.get('is_admin'):
                 conn = get_db_connection(); conn.execute("UPDATE users SET role = '一般用戶' WHERE username = ?", (t_u,)); conn.commit(); conn.close(); st.rerun()
             if c4.button("❌ 刪除（離職夥伴）"): 
                 conn = get_db_connection(); conn.execute("DELETE FROM users WHERE username = ?", (t_u,)); conn.commit(); conn.close(); st.rerun()
+
 
 
 
