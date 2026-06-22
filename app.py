@@ -59,11 +59,16 @@ st.markdown("""
 ORIGINAL_ADMIN = "余宸緯"
 DAMAGE_REASONS = ["盒凹", "嚴重盒凹", "盒污", "劃痕", "防盜貼", "已過期（一個月內）", "即期（兩個月內）", "短效（半年內）", "效期模糊", "批號模糊", "已開封", "已開封使用", "空盒", "膠膜破損", "膠膜嚴重破損", "膠膜污損", "色差", "漸層色差", "嚴重色差", "霧氣", "漏液", "嚴重漏液", "外盒有貼標籤", "外膜有貼標籤", "外膜有貼膠帶+盒內有貼標籤", "外盒有貼膠帶+盒內有貼標籤"]
 
+import os # 如果程式最上面沒有 import os，請記得補上
+
 def get_db_connection():
-    conn = sqlite3.connect('return_system.db')
+    # 這裡會強制抓取 app.py 所在的最頂層固定目錄，永遠不會因為改代碼而跑偏
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    db_path = os.path.join(base_dir, 'return_system.db')
+    
+    conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     return conn
-
 def init_db():
     conn = get_db_connection()
     cursor = conn.cursor()
