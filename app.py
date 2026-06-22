@@ -60,11 +60,16 @@ st.markdown("""
 ORIGINAL_ADMIN = "余宸緯"
 DAMAGE_REASONS = ["盒凹", "嚴重盒凹", "盒污", "劃痕", "防盜貼", "已過期（一個月內）", "即期（兩個月內）", "短效（半年內）", "效期模糊", "批號模糊", "已開封", "已開封使用", "空盒", "膠膜破損", "膠膜嚴重破損", "膠膜污損", "色差", "漸層色差", "嚴重色差", "霧氣", "漏液", "嚴重漏液", "外盒有貼標籤", "外膜有貼標籤", "外膜有貼膠帶+盒內有貼標籤", "外盒有貼膠帶+盒內有貼標籤"]
 
-# --- Supabase 雲端資料庫連線設定 ---
-DB_URI = "postgresql://postgres.zlmoazvoxadasdbdwbsl:ALS56606120@aws-1-ap-northeast-1.pooler.supabase.com:6543/postgres?pgbouncer=true"
-
+# --- Supabase 雲端資料庫：採用欄位拆解法，完美解決網址解讀失敗錯誤 ---
 def get_db_connection():
-    conn = psycopg2.connect(DB_URI)
+    conn = psycopg2.connect(
+        host="aws-1-ap-northeast-1.pooler.supabase.com",
+        port="6543",
+        user="postgres.zlmoazvoxadasdbdwbsl",
+        password="ALS56606120",
+        database="postgres",
+        sslmode="require"
+    )
     return conn
 
 def init_db():
@@ -282,7 +287,6 @@ else:
                                      (st.session_state['current_batch_id'], st.session_state['current_channel'], st.session_state['today_date_str']))
                     st.session_state['batch_created_in_db'] = True
                 
-                # PostgreSQL 寫入並返回剛生成的自動增量 ID
                 cursor.execute("""
                     INSERT INTO return_items (batch_id, barcode, return_type, expiry_date, quantity, quality_status, damage_reason, operator, approval_status, created_at, remark) 
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id
