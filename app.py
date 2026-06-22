@@ -145,7 +145,7 @@ if 'logged_in' not in st.session_state:
     else:
         st.session_state['logged_in'] = False
 
-st.title("📦 物流退貨點收系統 (雲端防掉單版)")
+st.title("📦 特捷物流退貨點收系統")
 
 if not st.session_state['logged_in']:
     tab1, tab2 = st.tabs(["👤 帳號登入", "📝 新用戶註冊"])
