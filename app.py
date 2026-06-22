@@ -1,6 +1,7 @@
 import streamlit as st
 import psycopg2
 from psycopg2.extras import RealDictCursor
+from psycopg2.pool import SimpleConnectionPool
 import pandas as pd
 from datetime import datetime, timedelta
 
@@ -60,9 +61,13 @@ st.markdown("""
 ORIGINAL_ADMIN = "余宸緯"
 DAMAGE_REASONS = ["盒凹", "嚴重盒凹", "盒污", "劃痕", "防盜貼", "已過期（一個月內）", "即期（兩個月內）", "短效（半年內）", "效期模糊", "批號模糊", "已開封", "已開封使用", "空盒", "膠膜破損", "膠膜嚴重破損", "膠膜污損", "色差", "漸層色差", "嚴重色差", "霧氣", "漏液", "嚴重漏液", "外盒有貼標籤", "外膜有貼標籤", "外膜有貼膠帶+盒內有貼標籤", "外盒有貼膠帶+盒內有貼標籤"]
 
-# --- Supabase 雲端資料庫：採用欄位拆解法，完美解決網址解讀失敗錯誤 ---
-def get_db_connection():
-    conn = psycopg2.connect(
+# --- 【高效優化】：使用 Streamlit 資源快取，建立永久連線池，徹底根除延遲卡頓 ---
+@st.cache_resource
+def init_connection_pool():
+    # 建立一個常駐連線池，最多允許 10 個多執行緒同時共用這條高速公路
+    pool = SimpleConnectionPool(
+        minconn=1,
+        maxconn=10,
         host="aws-1-ap-northeast-1.pooler.supabase.com",
         port="6543",
         user="postgres.zlmoazvoxadasdbdwbsl",
@@ -70,12 +75,19 @@ def get_db_connection():
         database="postgres",
         sslmode="require"
     )
-    return conn
+    return pool
+
+def get_db_connection():
+    pool = init_connection_pool()
+    return pool.getconn()
+
+def release_db_connection(conn):
+    pool = init_connection_pool()
+    pool.putconn(conn)
 
 def init_db():
     conn = get_db_connection()
     cursor = conn.cursor()
-    # 建立雲端資料表 (PostgreSQL 語法優化)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS users (
             username TEXT PRIMARY KEY, 
@@ -123,7 +135,6 @@ def init_db():
         )
     """)
     
-    # 預設建立超級管理員
     cursor.execute("""
         INSERT INTO users (username, password, register_date, role, status) 
         VALUES (%s, %s, %s, %s, %s)
@@ -132,7 +143,7 @@ def init_db():
     
     conn.commit()
     cursor.close()
-    conn.close()
+    release_db_connection(conn)
 
 init_db()
 
@@ -169,7 +180,7 @@ if not st.session_state['logged_in']:
                 else: st.error("❌ 密碼錯誤，請重新輸入。")
             else: st.error("❌ 查無此帳號，請確認姓名或前往註冊。")
             cursor.close()
-            conn.close()
+            release_db_connection(conn)
     with tab2:
         reg_name = st.text_input("請輸入你的中文真實姓名", key="reg_name").strip()
         reg_pwd = st.text_input("自訂密碼", type="password", key="reg_pwd")
@@ -186,7 +197,7 @@ if not st.session_state['logged_in']:
                 st.error("❌ 姓名已被註冊。")
             finally: 
                 cursor.close()
-                conn.close()
+                release_db_connection(conn)
 else:
     # --- 頂部右側局部刷新功能區 ---
     col_title, col_refresh = st.columns([9, 1])
@@ -208,7 +219,7 @@ else:
     cursor.execute("SELECT COUNT(*) FROM users WHERE status = 'pending'")
     pending_user_count = cursor.fetchone()[0]
     cursor.close()
-    conn.close()
+    release_db_connection(conn)
 
     tab_labels = ["📦 退貨點收作業", "🔍 歷史紀錄查詢與異常修正"]
     if st.session_state.get('is_admin'):
@@ -231,7 +242,7 @@ else:
                     st.session_state.update({'current_batch_id': b['batch_id'], 'current_channel': b['channel']})
                     st.rerun()
         cursor.close()
-        conn.close()
+        release_db_connection(conn)
 
         if not st.session_state.get('current_batch_id'):
             st.divider()
@@ -249,7 +260,7 @@ else:
                 count = cursor.fetchone()[0]
                 bid = f"{prefix}{code}_{today}_{count + 1:03d}"
                 cursor.close()
-                conn.close()
+                release_db_connection(conn)
                 
                 st.session_state.update({
                     'current_batch_id': bid, 
@@ -298,7 +309,7 @@ else:
                 
                 conn.commit()
                 cursor.close()
-                conn.close()
+                release_db_connection(conn)
                 
                 st.session_state['last_item_id'] = new_item_id
                 st.session_state['last_count'] = count
@@ -321,7 +332,7 @@ else:
                     cursor.execute("UPDATE return_batches SET status = '已完成' WHERE batch_id = %s", (st.session_state['current_batch_id'],))
                     conn.commit()
                 cursor.close()
-                conn.close()
+                release_db_connection(conn)
                 st.session_state.update({'current_channel': "", 'current_batch_id': "", 'last_item_id': None, 'last_count': None})
                 st.rerun()
 
@@ -376,7 +387,8 @@ else:
                 else:
                     st.session_state['df'] = pd.DataFrame()
                     st.warning("查無符合條件的資料")
-                conn.close()
+                # 釋放連線回連線池
+                release_db_connection(conn)
         
         if 'df' in st.session_state and not st.session_state['df'].empty:
             all_cols = st.session_state['df'].columns
@@ -406,7 +418,7 @@ else:
                                  (int(row['ID']), act, int(row['數量']), int(n_q)))
                 conn.commit()
                 cursor.close()
-                conn.close()
+                release_db_connection(conn)
                 st.success("申請已送出，待主管審核")
 
     # --- 主管審核 ---
@@ -417,7 +429,7 @@ else:
             with review_container:
                 conn = get_db_connection()
                 review_df = pd.read_sql_query("SELECT c.*, i.batch_id, i.barcode, i.operator as applicant, i.expiry_date FROM change_requests c JOIN return_items i ON c.item_id = i.id WHERE c.status = '審核中'", conn)
-                conn.close()
+                release_db_connection(conn)
                 
                 if not review_df.empty:
                     display = review_df[['batch_id', 'barcode', 'action', 'old_qty', 'new_qty', 'reason', 'applicant']]
@@ -452,7 +464,7 @@ else:
                                 processed_count += 1
                         conn.commit()
                         cursor.close()
-                        conn.close()
+                        release_db_connection(conn)
                         
                         if processed_count > 0:
                             st.success(f"✅ 審核完成，已成功處理 {processed_count} 筆申請！")
@@ -464,17 +476,17 @@ else:
             st.header("👥 員工權限")
             conn = get_db_connection()
             user_df = pd.read_sql_query("SELECT username as 名稱, register_date as 註冊日期時間, role as 用戶別, status as 狀態 FROM users", conn)
-            conn.close()
+            release_db_connection(conn)
             user_df.insert(0, "編號", range(1, len(user_df) + 1))
             st.dataframe(user_df, use_container_width=True, hide_index=True)
             
             t_u = st.text_input("輸入要操作的員工名稱").strip()
             c1, c2, c3, c4 = st.columns(4)
             if c1.button("✅ 審核通過"): 
-                conn = get_db_connection(); cursor = conn.cursor(); cursor.execute("UPDATE users SET status = 'approved' WHERE username = %s", (t_u,)); conn.commit(); cursor.close(); conn.close(); st.rerun()
+                conn = get_db_connection(); cursor = conn.cursor(); cursor.execute("UPDATE users SET status = 'approved' WHERE username = %s", (t_u,)); conn.commit(); cursor.close(); release_db_connection(conn); st.rerun()
             if c2.button("🎖️ 調整為管理者"): 
-                conn = get_db_connection(); cursor = conn.cursor(); cursor.execute("UPDATE users SET role = '管理者' WHERE username = %s", (t_u,)); conn.commit(); cursor.close(); conn.close(); st.rerun()
+                conn = get_db_connection(); cursor = conn.cursor(); cursor.execute("UPDATE users SET role = '管理者' WHERE username = %s", (t_u,)); conn.commit(); cursor.close(); release_db_connection(conn); st.rerun()
             if c3.button("👤 調整為一般用戶"): 
-                conn = get_db_connection(); cursor = conn.cursor(); cursor.execute("UPDATE users SET role = '一般用戶' WHERE username = %s", (t_u,)); conn.commit(); cursor.close(); conn.close(); st.rerun()
+                conn = get_db_connection(); cursor = conn.cursor(); cursor.execute("UPDATE users SET role = '一般用戶' WHERE username = %s", (t_u,)); conn.commit(); cursor.close(); release_db_connection(conn); st.rerun()
             if c4.button("❌ 刪除（離職夥伴）"): 
-                conn = get_db_connection(); cursor = conn.cursor(); cursor.execute("DELETE FROM users WHERE username = %s", (t_u,)); conn.commit(); cursor.close(); conn.close(); st.rerun()
+                conn = get_db_connection(); cursor = conn.cursor(); cursor.execute("DELETE FROM users WHERE username = %s", (t_u,)); conn.commit(); cursor.close(); release_db_connection(conn); st.rerun()
