@@ -1,5 +1,6 @@
 import streamlit as st
-import sqlite3
+import psycopg2
+from psycopg2.extras import RealDictCursor
 import pandas as pd
 from datetime import datetime, timedelta
 
@@ -59,37 +60,78 @@ st.markdown("""
 ORIGINAL_ADMIN = "余宸緯"
 DAMAGE_REASONS = ["盒凹", "嚴重盒凹", "盒污", "劃痕", "防盜貼", "已過期（一個月內）", "即期（兩個月內）", "短效（半年內）", "效期模糊", "批號模糊", "已開封", "已開封使用", "空盒", "膠膜破損", "膠膜嚴重破損", "膠膜污損", "色差", "漸層色差", "嚴重色差", "霧氣", "漏液", "嚴重漏液", "外盒有貼標籤", "外膜有貼標籤", "外膜有貼膠帶+盒內有貼標籤", "外盒有貼膠帶+盒內有貼標籤"]
 
-import os # 如果程式最上面沒有 import os，請記得補上
+# --- Supabase 雲端資料庫連線設定 ---
+DB_URI = "postgresql://postgres.zlmoazvoxadasdbdwbsl:ALS56606120@aws-1-ap-northeast-1.pooler.supabase.com:6543/postgres?pgbouncer=true"
 
 def get_db_connection():
-    # 這裡會強制抓取 app.py 所在的最頂層固定目錄，永遠不會因為改代碼而跑偏
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    db_path = os.path.join(base_dir, 'return_system.db')
-    
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
+    conn = psycopg2.connect(DB_URI)
     return conn
+
 def init_db():
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("CREATE TABLE IF NOT EXISTS users (username TEXT PRIMARY KEY, password TEXT, register_date TEXT, role TEXT)")
-    try: cursor.execute("ALTER TABLE users ADD COLUMN status TEXT DEFAULT 'pending'")
-    except: pass
-    cursor.execute("CREATE TABLE IF NOT EXISTS return_batches (batch_id TEXT PRIMARY KEY, channel TEXT, register_date TEXT, status TEXT)")
-    cursor.execute("CREATE TABLE IF NOT EXISTS return_items (id INTEGER PRIMARY KEY AUTOINCREMENT, batch_id TEXT, barcode TEXT, return_type TEXT, expiry_date TEXT, quantity INTEGER, quality_status TEXT, damage_reason TEXT, operator TEXT, approval_status TEXT, created_at TEXT, remark TEXT)")
-    cursor.execute("CREATE TABLE IF NOT EXISTS change_requests (req_id INTEGER PRIMARY KEY AUTOINCREMENT, item_id INTEGER, action TEXT, old_qty INTEGER, new_qty INTEGER, new_status TEXT, new_expiry TEXT, reason TEXT, status TEXT)")
-    try: cursor.execute("ALTER TABLE change_requests ADD COLUMN new_expiry TEXT")
-    except: pass
-    try:
-        cursor.execute("INSERT OR IGNORE INTO users (username, password, register_date, role, status) VALUES (?, ?, ?, ?, ?)", 
-                       ("余宸緯", "123456", get_tw_now().strftime("%Y-%m-%d %H:%M:%S"), "管理者", "approved"))
-    except:
-        pass
-    conn.commit(); conn.close()
+    # 建立雲端資料表 (PostgreSQL 語法優化)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            username TEXT PRIMARY KEY, 
+            password TEXT, 
+            register_date TEXT, 
+            role TEXT,
+            status TEXT DEFAULT 'pending'
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS return_batches (
+            batch_id TEXT PRIMARY KEY, 
+            channel TEXT, 
+            register_date TEXT, 
+            status TEXT
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS return_items (
+            id SERIAL PRIMARY KEY, 
+            batch_id TEXT, 
+            barcode TEXT, 
+            return_type TEXT, 
+            expiry_date TEXT, 
+            quantity INTEGER, 
+            quality_status TEXT, 
+            damage_reason TEXT, 
+            operator TEXT, 
+            approval_status TEXT, 
+            created_at TEXT, 
+            remark TEXT
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS change_requests (
+            req_id SERIAL PRIMARY KEY, 
+            item_id INTEGER, 
+            action TEXT, 
+            old_qty INTEGER, 
+            new_qty INTEGER, 
+            new_status TEXT, 
+            new_expiry TEXT, 
+            reason TEXT, 
+            status TEXT
+        )
+    """)
+    
+    # 預設建立超級管理員
+    cursor.execute("""
+        INSERT INTO users (username, password, register_date, role, status) 
+        VALUES (%s, %s, %s, %s, %s)
+        ON CONFLICT (username) DO NOTHING
+    """, ("余宸緯", "123456", get_tw_now().strftime("%Y-%m-%d %H:%M:%S"), "管理者", "approved"))
+    
+    conn.commit()
+    cursor.close()
+    conn.close()
 
 init_db()
 
-# --- 瀏覽器重整防護 ---
+# --- 瀏覽器 F5 重整防護 ---
 if 'logged_in' not in st.session_state:
     if "user" in st.query_params and "role" in st.query_params:
         st.session_state['logged_in'] = True
@@ -98,7 +140,7 @@ if 'logged_in' not in st.session_state:
     else:
         st.session_state['logged_in'] = False
 
-st.title("📦 物流退貨點收系統")
+st.title("📦 物流退貨點收系統 (雲端防掉單版)")
 
 if not st.session_state['logged_in']:
     tab1, tab2 = st.tabs(["👤 帳號登入", "📝 新用戶註冊"])
@@ -107,7 +149,9 @@ if not st.session_state['logged_in']:
         login_pwd = st.text_input("請輸入密碼", type="password", key="login_pwd")
         if st.button("進入系統"):
             conn = get_db_connection()
-            user = conn.execute('SELECT * FROM users WHERE username = ?', (login_name,)).fetchone()
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+            cursor.execute('SELECT * FROM users WHERE username = %s', (login_name,))
+            user = cursor.fetchone()
             if user:
                 if user['password'] == login_pwd:
                     if login_name == ORIGINAL_ADMIN or user['status'] == 'approved':
@@ -119,19 +163,25 @@ if not st.session_state['logged_in']:
                     else: st.error("❌ 您的帳號尚未通過管理員審核，請稍候。")
                 else: st.error("❌ 密碼錯誤，請重新輸入。")
             else: st.error("❌ 查無此帳號，請確認姓名或前往註冊。")
+            cursor.close()
             conn.close()
     with tab2:
         reg_name = st.text_input("請輸入你的中文真實姓名", key="reg_name").strip()
         reg_pwd = st.text_input("自訂密碼", type="password", key="reg_pwd")
         if st.button("建立帳號"):
             conn = get_db_connection()
+            cursor = conn.cursor()
             try:
                 role = "管理者" if reg_name == ORIGINAL_ADMIN else "一般用戶"
                 status = "approved" if reg_name == ORIGINAL_ADMIN else "pending"
-                conn.execute('INSERT INTO users (username, password, register_date, role, status) VALUES (?, ?, ?, ?, ?)', (reg_name, reg_pwd, get_tw_now().strftime("%Y-%m-%d %H:%M:%S"), role, status))
-                conn.commit(); st.success("註冊成功！請等待管理者審核。")
-            except: st.error("❌ 姓名已被註冊。")
-            finally: conn.close()
+                cursor.execute('INSERT INTO users (username, password, register_date, role, status) VALUES (%s, %s, %s, %s, %s)', (reg_name, reg_pwd, get_tw_now().strftime("%Y-%m-%d %H:%M:%S"), role, status))
+                conn.commit()
+                st.success("註冊成功！請等待管理者審核。")
+            except: 
+                st.error("❌ 姓名已被註冊。")
+            finally: 
+                cursor.close()
+                conn.close()
 else:
     # --- 頂部右側局部刷新功能區 ---
     col_title, col_refresh = st.columns([9, 1])
@@ -147,8 +197,12 @@ else:
         st.rerun()
     
     conn = get_db_connection()
-    pending_req_count = conn.execute("SELECT COUNT(*) FROM change_requests WHERE status = '審核中'").fetchone()[0]
-    pending_user_count = conn.execute("SELECT COUNT(*) FROM users WHERE status = 'pending'").fetchone()[0]
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) FROM change_requests WHERE status = '審核中'")
+    pending_req_count = cursor.fetchone()[0]
+    cursor.execute("SELECT COUNT(*) FROM users WHERE status = 'pending'")
+    pending_user_count = cursor.fetchone()[0]
+    cursor.close()
     conn.close()
 
     tab_labels = ["📦 退貨點收作業", "🔍 歷史紀錄查詢與異常修正"]
@@ -161,13 +215,17 @@ else:
 
     with tabs[0]:
         conn = get_db_connection()
-        unfinished = conn.execute("SELECT batch_id, channel FROM return_batches WHERE status = '作業中'").fetchall()
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+        cursor.execute("SELECT batch_id, channel FROM return_batches WHERE status = '作業中'")
+        unfinished = cursor.fetchall()
         for b in unfinished:
             if not st.session_state.get('current_batch_id'):
-                count = conn.execute("SELECT COUNT(*) FROM return_items WHERE batch_id = ?", (b['batch_id'],)).fetchone()[0]
+                cursor.execute("SELECT COUNT(*) FROM return_items WHERE batch_id = %s", (b['batch_id'],))
+                count = cursor.fetchone()[0]
                 if st.button(f"繼續作業：:red[{b['batch_id']}] (:red[{b['channel']}]) | 已完成 {count} 筆"):
                     st.session_state.update({'current_batch_id': b['batch_id'], 'current_channel': b['channel']})
                     st.rerun()
+        cursor.close()
         conn.close()
 
         if not st.session_state.get('current_batch_id'):
@@ -181,8 +239,11 @@ else:
                 today = get_tw_now().strftime("%Y%m%d")
                 
                 conn = get_db_connection()
-                count = conn.execute("SELECT COUNT(*) FROM return_batches WHERE batch_id LIKE ?", (f"{prefix}{code}_{today}%",)).fetchone()[0]
+                cursor = conn.cursor()
+                cursor.execute("SELECT COUNT(*) FROM return_batches WHERE batch_id LIKE %s", (f"{prefix}{code}_{today}%",))
+                count = cursor.fetchone()[0]
                 bid = f"{prefix}{code}_{today}_{count + 1:03d}"
+                cursor.close()
                 conn.close()
                 
                 st.session_state.update({
@@ -214,25 +275,33 @@ else:
                 cursor = conn.cursor()
                 
                 if not st.session_state.get('batch_created_in_db'):
-                    check_exist = conn.execute("SELECT COUNT(*) FROM return_batches WHERE batch_id = ?", (st.session_state['current_batch_id'],)).fetchone()[0]
+                    cursor.execute("SELECT COUNT(*) FROM return_batches WHERE batch_id = %s", (st.session_state['current_batch_id'],))
+                    check_exist = cursor.fetchone()[0]
                     if check_exist == 0:
-                        conn.execute("INSERT INTO return_batches VALUES (?, ?, ?, '作業中')", 
+                        cursor.execute("INSERT INTO return_batches VALUES (%s, %s, %s, '作業中')", 
                                      (st.session_state['current_batch_id'], st.session_state['current_channel'], st.session_state['today_date_str']))
                     st.session_state['batch_created_in_db'] = True
                 
-                cursor.execute("INSERT INTO return_items (batch_id, barcode, return_type, expiry_date, quantity, quality_status, damage_reason, operator, approval_status, created_at, remark) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (st.session_state['current_batch_id'], b_input, r_type, exp_date, qty, qual, reason, st.session_state['username'], '已確認', get_tw_now().strftime("%Y-%m-%d %H:%M:%S"), remark))
+                # PostgreSQL 寫入並返回剛生成的自動增量 ID
+                cursor.execute("""
+                    INSERT INTO return_items (batch_id, barcode, return_type, expiry_date, quantity, quality_status, damage_reason, operator, approval_status, created_at, remark) 
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id
+                """, (st.session_state['current_batch_id'], b_input, r_type, exp_date, qty, qual, reason, st.session_state['username'], '已確認', get_tw_now().strftime("%Y-%m-%d %H:%M:%S"), remark))
                 
-                new_item_id = cursor.lastrowid
-                count = conn.execute("SELECT COUNT(*) FROM return_items WHERE batch_id = ?", (st.session_state['current_batch_id'],)).fetchone()[0]
+                new_item_id = cursor.fetchone()[0]
+                cursor.execute("SELECT COUNT(*) FROM return_items WHERE batch_id = %s", (st.session_state['current_batch_id'],))
+                count = cursor.fetchone()[0]
+                
                 conn.commit()
+                cursor.close()
                 conn.close()
                 
                 st.session_state['last_item_id'] = new_item_id
                 st.session_state['last_count'] = count
-                st.toast(f"🎉 儲存成功！ID: {new_item_id}")
+                st.toast(f"🎉 儲存成功！雲端ID: {new_item_id}")
             
             if st.session_state.get('last_item_id'):
-                st.success(f"✅ 上一筆儲存成功！該筆資料 ID 為：:blue[**{st.session_state.get('last_item_id')}**] ｜ 目前本單已累積：{st.session_state.get('last_count')} 筆")
+                st.success(f"✅ 上一筆儲存成功！該筆資料雲端 ID 為：:blue[**{st.session_state.get('last_item_id')}**] ｜ 目前本單已累積：{st.session_state.get('last_count')} 筆")
             
             st.divider()
             c1, c2 = st.columns(2)
@@ -243,9 +312,11 @@ else:
                 
             if c2.button("🛑 結束 / 進行關單", use_container_width=True, key="close-btn"):
                 conn = get_db_connection()
+                cursor = conn.cursor()
                 if st.session_state.get('batch_created_in_db'):
-                    conn.execute("UPDATE return_batches SET status = '已完成' WHERE batch_id = ?", (st.session_state['current_batch_id'],))
+                    cursor.execute("UPDATE return_batches SET status = '已完成' WHERE batch_id = %s", (st.session_state['current_batch_id'],))
                     conn.commit()
+                cursor.close()
                 conn.close()
                 st.session_state.update({'current_channel': "", 'current_batch_id': "", 'last_item_id': None, 'last_count': None})
                 st.rerun()
@@ -275,13 +346,19 @@ else:
                 query = "SELECT i.id, i.created_at, b.channel, i.batch_id, i.barcode, i.return_type, i.expiry_date, i.quantity, i.quality_status, i.damage_reason, i.operator FROM return_items i LEFT JOIN return_batches b ON i.batch_id = b.batch_id WHERE 1=1"
                 params = []
                 
-                if env_filter == "正式": query += " AND i.batch_id NOT LIKE 'T-%'"
-                elif env_filter == "測試": query += " AND i.batch_id LIKE 'T-%'"
+                if env_filter == "正式": 
+                    query += " AND i.batch_id NOT LIKE 'T-%%'"
+                elif env_filter == "測試": 
+                    query += " AND i.batch_id LIKE 'T-%%'"
                 
-                if s_batch: query += " AND i.batch_id LIKE ?"; params.append(f"%{s_batch}%")
-                if s_barcode: query += " AND i.barcode LIKE ?"; params.append(f"%{s_barcode}%")
-                if s_operator: query += " AND i.operator LIKE ?"; params.append(f"%{s_operator}%")
-                if s_type: query += " AND i.return_type IN (" + ",".join(["?"]*len(s_type)) + ")"; params.extend(s_type)
+                if s_batch: 
+                    query += " AND i.batch_id LIKE %s"; params.append(f"%{s_batch}%")
+                if s_barcode: 
+                    query += " AND i.barcode LIKE %s"; params.append(f"%{s_barcode}%")
+                if s_operator: 
+                    query += " AND i.operator LIKE %s"; params.append(f"%{s_operator}%")
+                if s_type: 
+                    query += " AND i.return_type IN %s"; params.append(tuple(s_type))
                 
                 df = pd.read_sql_query(query, conn, params=params)
                 if not df.empty:
@@ -298,14 +375,12 @@ else:
                 conn.close()
         
         if 'df' in st.session_state and not st.session_state['df'].empty:
-            # 【完美對齊修正】：強制將「選取」以外的所有中文欄位都鎖死唯讀
             all_cols = st.session_state['df'].columns
             disabled_cols = [c for c in all_cols if c != "選取"]
             
             edited_df = st.data_editor(st.session_state['df'], disabled=disabled_cols, hide_index=True)
             selected = edited_df[edited_df.get("選取", False) == True]
             
-            # 【修復 CSV 匯出】：確保轉換格式與欄位中文名稱完全契合，Excel 打開不會亂碼
             csv_data = edited_df.to_csv(index=False).encode('utf-8-sig')
             st.download_button(
                 label="📥 下載目前查詢表格為 CSV",
@@ -321,11 +396,14 @@ else:
             
             if st.button("⚠️ 送出申請"):
                 conn = get_db_connection()
+                cursor = conn.cursor()
                 for _, row in selected.iterrows():
-                    # 這裡對齊了表格中的中文欄位名「ID」與「數量」
-                    conn.execute("INSERT INTO change_requests (item_id, action, old_qty, new_qty, status) VALUES (?, ?, ?, ?, ?)", 
-                                 (int(row['ID']), act, int(row['數量']), int(n_q), "審核中"))
-                conn.commit(); conn.close(); st.success("申請已送出，待主管審核")
+                    cursor.execute("INSERT INTO change_requests (item_id, action, old_qty, new_qty, status) VALUES (%s, %s, %s, %s, '審核中')", 
+                                 (int(row['ID']), act, int(row['數量']), int(n_q)))
+                conn.commit()
+                cursor.close()
+                conn.close()
+                st.success("申請已送出，待主管審核")
 
     # --- 主管審核 ---
     if st.session_state.get('is_admin'):
@@ -342,11 +420,9 @@ else:
                     display.columns = ['單號', '商品條碼', '動作', '原數量', '新數量', '原因', '申請人']
                     display.insert(0, "同意", False)
                     
-                    # 除了主管勾選的 "同意" 欄位外，其他欄位不論身分一律唯讀鎖死
                     admin_disabled_cols = [c for c in display.columns if c != "同意"]
                     reviewed = st.data_editor(display, disabled=admin_disabled_cols, hide_index=True, key="admin_review_editor")
                     
-                    # 待審核報表匯出 CSV
                     review_csv = reviewed.to_csv(index=False).encode('utf-8-sig')
                     st.download_button(
                         label="📥 下載待審核清單為 CSV",
@@ -358,18 +434,21 @@ else:
                     
                     if st.button("🟢 批量處理"):
                         conn = get_db_connection()
+                        cursor = conn.cursor()
                         processed_count = 0
                         for i, row in reviewed.iterrows():
                             if row["同意"]:
                                 req = review_df.iloc[i]
                                 if req['action'] == "刪除資料":
-                                    conn.execute("DELETE FROM return_items WHERE id = ?", (int(req['item_id']),))
+                                    cursor.execute("DELETE FROM return_items WHERE id = %s", (int(req['item_id']),))
                                 elif req['action'] == "數量更正":
-                                    conn.execute("UPDATE return_items SET quantity = ? WHERE id = ?", (int(row['新數量']), int(req['item_id'])))
+                                    cursor.execute("UPDATE return_items SET quantity = %s WHERE id = %s", (int(row['新數量']), int(req['item_id'])))
                                 
-                                conn.execute("UPDATE change_requests SET status = '已確認' WHERE req_id = ?", (int(req['req_id']),))
+                                cursor.execute("UPDATE change_requests SET status = '已確認' WHERE req_id = %s", (int(req['req_id']),))
                                 processed_count += 1
-                        conn.commit(); conn.close()
+                        conn.commit()
+                        cursor.close()
+                        conn.close()
                         
                         if processed_count > 0:
                             st.success(f"✅ 審核完成，已成功處理 {processed_count} 筆申請！")
@@ -388,10 +467,10 @@ else:
             t_u = st.text_input("輸入要操作的員工名稱").strip()
             c1, c2, c3, c4 = st.columns(4)
             if c1.button("✅ 審核通過"): 
-                conn = get_db_connection(); conn.execute("UPDATE users SET status = 'approved' WHERE username = ?", (t_u,)); conn.commit(); conn.close(); st.rerun()
+                conn = get_db_connection(); cursor = conn.cursor(); cursor.execute("UPDATE users SET status = 'approved' WHERE username = %s", (t_u,)); conn.commit(); cursor.close(); conn.close(); st.rerun()
             if c2.button("🎖️ 調整為管理者"): 
-                conn = get_db_connection(); conn.execute("UPDATE users SET role = '管理者' WHERE username = ?", (t_u,)); conn.commit(); conn.close(); st.rerun()
+                conn = get_db_connection(); cursor = conn.cursor(); cursor.execute("UPDATE users SET role = '管理者' WHERE username = %s", (t_u,)); conn.commit(); cursor.close(); conn.close(); st.rerun()
             if c3.button("👤 調整為一般用戶"): 
-                conn = get_db_connection(); conn.execute("UPDATE users SET role = '一般用戶' WHERE username = ?", (t_u,)); conn.commit(); conn.close(); st.rerun()
+                conn = get_db_connection(); cursor = conn.cursor(); cursor.execute("UPDATE users SET role = '一般用戶' WHERE username = %s", (t_u,)); conn.commit(); cursor.close(); conn.close(); st.rerun()
             if c4.button("❌ 刪除（離職夥伴）"): 
-                conn = get_db_connection(); conn.execute("DELETE FROM users WHERE username = ?", (t_u,)); conn.commit(); conn.close(); st.rerun()
+                conn = get_db_connection(); cursor = conn.cursor(); cursor.execute("DELETE FROM users WHERE username = %s", (t_u,)); conn.commit(); cursor.close(); conn.close(); st.rerun()
