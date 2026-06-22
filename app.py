@@ -32,7 +32,7 @@ BARCODE_ALERTS = {
     "4710155285912": ["需退回工廠商品，請額外裝箱並貼上大字報（好壞品分開放）"],
     "4710155278921": ["需退回工廠商品，請額外裝箱並貼上大字報（好壞品分開放）"],
     "4710155282386": ["需退回工廠商品，請額外裝箱並貼上大字報（好壞品分開放）"],
-    "4710155278860": ["需退回工廠商品 bubble（好壞品分開放）"]
+    "4710155278860": ["需退回工廠商品，請額外裝箱並貼上大字報（好壞品分開放）"]
 }
 
 # --- 莫蘭迪配色與表格放大設定 ---
@@ -41,8 +41,6 @@ st.markdown("""
     div.stButton > button[kind="primary"] { background-color: #8da3b4 !important; border: none !important; color: white !important; }
     div.stButton > button#back-btn { background-color: #d4c4a8 !important; border: none !important; color: white !important; }
     div.stButton > button#close-btn { background-color: #c48b8b !important; border: none !important; color: white !important; }
-    /* 讓頂部刷新按鈕靠右對齊 */
-    .refresh-container { display: flex; justify-content: flex-end; margin-bottom: -10px; }
     
     /* 表格樣式優化：讓上下左右的索引標題、內容、下拉選單全部變大且醒目 */
     [data-testid="stDataEditor"] *, [data-testid="stDataFrame"] * {
@@ -295,15 +293,15 @@ else:
                 conn.close()
         
         if 'df' in st.session_state and not st.session_state['df'].empty:
-            # 【優化：強制唯讀】使用 disabled 參數，將除了 "選取" 欄位之外的所有欄位全部鎖死
+            # 【完美對齊修正】：強制將「選取」以外的所有中文欄位都鎖死唯讀
             all_cols = st.session_state['df'].columns
             disabled_cols = [c for c in all_cols if c != "選取"]
             
             edited_df = st.data_editor(st.session_state['df'], disabled=disabled_cols, hide_index=True)
             selected = edited_df[edited_df.get("選取", False) == True]
             
-            # 【新增功能：匯出 CSV 報表】
-            csv_data = st.session_state['df'].to_csv(index=False).encode('utf-8-sig')
+            # 【修復 CSV 匯出】：確保轉換格式與欄位中文名稱完全契合，Excel 打開不會亂碼
+            csv_data = edited_df.to_csv(index=False).encode('utf-8-sig')
             st.download_button(
                 label="📥 下載目前查詢表格為 CSV",
                 data=csv_data,
@@ -319,6 +317,7 @@ else:
             if st.button("⚠️ 送出申請"):
                 conn = get_db_connection()
                 for _, row in selected.iterrows():
+                    # 這裡對齊了表格中的中文欄位名「ID」與「數量」
                     conn.execute("INSERT INTO change_requests (item_id, action, old_qty, new_qty, status) VALUES (?, ?, ?, ?, ?)", 
                                  (int(row['ID']), act, int(row['數量']), int(n_q), "審核中"))
                 conn.commit(); conn.close(); st.success("申請已送出，待主管審核")
@@ -338,12 +337,12 @@ else:
                     display.columns = ['單號', '商品條碼', '動作', '原數量', '新數量', '原因', '申請人']
                     display.insert(0, "同意", False)
                     
-                    # 【優化：強制唯讀】不論身分，除了主管點選的 "同意" 欄位外，其他欄位一律鎖死
+                    # 除了主管勾選的 "同意" 欄位外，其他欄位不論身分一律唯讀鎖死
                     admin_disabled_cols = [c for c in display.columns if c != "同意"]
                     reviewed = st.data_editor(display, disabled=admin_disabled_cols, hide_index=True, key="admin_review_editor")
                     
-                    # 【新增功能：匯出待審核清單 CSV】
-                    review_csv = display.to_csv(index=False).encode('utf-8-sig')
+                    # 待審核報表匯出 CSV
+                    review_csv = reviewed.to_csv(index=False).encode('utf-8-sig')
                     st.download_button(
                         label="📥 下載待審核清單為 CSV",
                         data=review_csv,
