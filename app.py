@@ -76,6 +76,8 @@ def run_cached_query(query, params=None):
 def clear_query_cache():
     st.cache_data.clear()
 
+# 【效能修復】：加上這行快取，讓資料表檢查只在伺服器啟動時跑一次，徹底解除卡頓！
+@st.cache_resource
 def init_db():
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -119,7 +121,9 @@ def init_db():
     conn.commit()
     cursor.close()
     release_db_connection(conn)
+    return True # 回傳值讓 Streamlit 可以快取它
 
+# 執行初始化 (現在只會跑一次)
 init_db()
 
 if 'logged_in' not in st.session_state:
@@ -344,10 +348,12 @@ else:
             n_q, n_status, n_expiry, n_reason = 0, "", "", ""
             if act == "數量更正":
                 n_q = st.number_input("請輸入修正後的【新數量】", min_value=1, step=1)
+            # 【新功能】：貨況更正也加入數量輸入欄位
             elif act == "貨況更正":
                 n_status = st.radio("請選擇【新貨況別】", ["良品", "不良品"], horizontal=True)
                 if n_status == "不良品":
                     n_reason = ", ".join(st.multiselect("請複選【新不良原因】", DAMAGE_REASONS))
+                n_q = st.number_input("對應貨況更正的數量", min_value=1, step=1)
             elif act == "效期更正":
                 n_expiry = st.text_input("請輸入【新有效期限】(格式:20260822)")
                 n_q = st.number_input("對應效期更正的數量", min_value=1, step=1)
@@ -405,8 +411,9 @@ else:
                                     cursor.execute("DELETE FROM return_items WHERE id = %s", (int(req['item_id']),))
                                 elif req['action'] == "數量更正":
                                     cursor.execute("UPDATE return_items SET quantity = %s WHERE id = %s", (int(row['申請新數量']), int(req['item_id'])))
+                                # 【新功能】：主管審核貨況更正時，會一併把新數量寫進資料庫裡
                                 elif req['action'] == "貨況更正":
-                                    cursor.execute("UPDATE return_items SET quality_status = %s, damage_reason = %s WHERE id = %s", (str(row['變更貨況']), str(row['變更原因']), int(req['item_id'])))
+                                    cursor.execute("UPDATE return_items SET quality_status = %s, damage_reason = %s, quantity = %s WHERE id = %s", (str(row['變更貨況']), str(row['變更原因']), int(row['申請新數量']), int(req['item_id'])))
                                 elif req['action'] == "效期更正":
                                     cursor.execute("UPDATE return_items SET expiry_date = %s, quantity = %s WHERE id = %s", (str(row['變更效期']), int(row['申請新數量']), int(req['item_id'])))
                                 
