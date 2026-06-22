@@ -78,7 +78,6 @@ def get_db_connection():
 def release_db_connection(conn):
     init_connection_pool().putconn(conn)
 
-# --- 【終極速度優化】：對查詢進行緩存，杜絕頻繁操作造成的系統卡頓延遲 ---
 @st.cache_data(show_spinner="正在從雲端同步數據...")
 def run_cached_query(query, params=None):
     conn = get_db_connection()
@@ -114,6 +113,19 @@ def init_db():
             new_status TEXT, new_expiry TEXT, reason TEXT, status TEXT, applicant TEXT
         )
     """)
+    
+    # --- 【自動防呆修復】強制幫雲端補上可能遺漏的欄位 ---
+    try: cursor.execute("ALTER TABLE change_requests ADD COLUMN applicant TEXT;"); conn.commit()
+    except: conn.rollback()
+    try: cursor.execute("ALTER TABLE change_requests ADD COLUMN new_status TEXT;"); conn.commit()
+    except: conn.rollback()
+    try: cursor.execute("ALTER TABLE change_requests ADD COLUMN new_expiry TEXT;"); conn.commit()
+    except: conn.rollback()
+    try: cursor.execute("ALTER TABLE change_requests ADD COLUMN reason TEXT;"); conn.commit()
+    except: conn.rollback()
+    try: cursor.execute("ALTER TABLE return_items ADD COLUMN remark TEXT;"); conn.commit()
+    except: conn.rollback()
+    
     cursor.execute("""
         INSERT INTO users (username, password, register_date, role, status) 
         VALUES (%s, %s, %s, %s, %s) ON CONFLICT (username) DO NOTHING
@@ -131,7 +143,7 @@ if 'logged_in' not in st.session_state:
     else:
         st.session_state['logged_in'] = False
 
-st.title("📦 特捷物流退貨點收系統")
+st.title("📦 特捷物流退貨點收系統 ")
 
 if not st.session_state['logged_in']:
     tab1, tab2 = st.tabs(["👤 帳號登入", "📝 新用戶註冊"])
@@ -155,7 +167,6 @@ if not st.session_state['logged_in']:
             else: st.error("❌ 帳號或密碼錯誤。")
             cursor.close()
             release_db_connection(conn)
-    # 註冊略
     with tab2:
         reg_name = st.text_input("請輸入你的中文真實姓名", key="reg_name").strip()
         reg_pwd = st.text_input("自訂密碼", type="password", key="reg_pwd")
@@ -170,7 +181,6 @@ if not st.session_state['logged_in']:
             except: st.error("❌ 姓名已被註冊。")
             finally: cursor.close(); release_db_connection(conn)
 else:
-    # 右上角局部刷新按鈕
     col_title, col_refresh = st.columns([9, 1])
     with col_refresh:
         if st.button("🔄 刷新數據", help="強制清除快取，即時抓取雲端最新數據"):
@@ -182,7 +192,6 @@ else:
     if st.sidebar.button("登出系統"): 
         st.session_state.clear(); st.query_params.clear(); clear_query_cache(); st.rerun()
     
-    # 獲取通知計數
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT COUNT(*) FROM change_requests WHERE status = '審核中'")
@@ -262,7 +271,7 @@ else:
                 conn.commit(); cursor.close(); release_db_connection(conn)
                 
                 st.session_state.update({'last_item_id': new_item_id, 'last_count': count})
-                clear_query_cache() # 只要有異動點收，立刻清空快取
+                clear_query_cache()
                 st.toast(f"🎉 儲存成功！雲端ID: {new_item_id}")
             
             if st.session_state.get('last_item_id'):
@@ -284,21 +293,38 @@ else:
     with tabs[1]:
         st.header("🔍 歷史紀錄查詢與異常修正")
         with st.expander("⚙️ 篩選條件設定", expanded=True):
+            # --- 【完美還原】所有你原本的篩選條件與版面 ---
             env_filter = st.radio("環境篩選", ["正式", "測試", "All"], horizontal=True) if st.session_state.get('is_admin') else "正式"
             c1, c2 = st.columns(2)
-            s_batch = c1.text_input("單號 (批號)")
-            s_barcode = c2.text_input("商品條碼 (包含篩選)")
+            s_start = c1.date_input("開始日期", None)
+            s_end = c2.date_input("結束日期", None)
+            s_batch = st.text_input("單號 (批號)")
+            
+            c3, c4, c5 = st.columns(3)
+            s_barcode = c3.text_input("商品條碼 (包含篩選)")
+            s_operator = c4.text_input("作業員")
+            s_type = c5.multiselect("形態", ["箱出", "散出", "組出"])
+            
+            c6, c7 = st.columns(2)
+            s_channel = c6.multiselect("通路", list(CHANNEL_CODES.keys()))
+            s_quality = c7.multiselect("貨況", ["良品", "不良品"])
             
             if st.button("執行查詢", type="primary"):
                 query = "SELECT i.id, i.created_at, b.channel, i.batch_id, i.barcode, i.return_type, i.expiry_date, i.quantity, i.quality_status, i.damage_reason, i.operator FROM return_items i LEFT JOIN return_batches b ON i.batch_id = b.batch_id WHERE 1=1"
                 params = []
                 if env_filter == "正式": query += " AND i.batch_id NOT LIKE 'T-%%'"
                 elif env_filter == "測試": query += " AND i.batch_id LIKE 'T-%%'"
+                
+                if s_start: query += " AND DATE(i.created_at) >= %s"; params.append(s_start.strftime("%Y-%m-%d"))
+                if s_end: query += " AND DATE(i.created_at) <= %s"; params.append(s_end.strftime("%Y-%m-%d"))
                 if s_batch: query += " AND i.batch_id LIKE %s"; params.append(f"%{s_batch}%")
                 if s_barcode: query += " AND i.barcode LIKE %s"; params.append(f"%{s_barcode}%")
+                if s_operator: query += " AND i.operator LIKE %s"; params.append(f"%{s_operator}%")
+                if s_type: query += " AND i.return_type IN %s"; params.append(tuple(s_type))
+                if s_channel: query += " AND b.channel IN %s"; params.append(tuple(s_channel))
+                if s_quality: query += " AND i.quality_status IN %s"; params.append(tuple(s_quality))
                 
-                # 使用 Cache 加速查詢
-                df = run_cached_query(query, params=params if params else None)
+                df = run_cached_query(query, params=tuple(params) if params else None)
                 if not df.empty:
                     df['FullDate'] = pd.to_datetime(df['created_at'])
                     df['日期'] = df['FullDate'].dt.strftime('%Y-%m-%d')
@@ -321,7 +347,6 @@ else:
             st.divider()
             act = st.selectbox("動作別", ["數量更正", "貨況更正", "效期更正", "刪除資料"])
             
-            # --- 【功能新增】：動態異常更正輸入欄位 ---
             n_q, n_status, n_expiry, n_reason = 0, "", "", ""
             if act == "數量更正":
                 n_q = st.number_input("請輸入修正後的【新數量】", min_value=1, step=1)
@@ -353,7 +378,6 @@ else:
             st.header("🔔 主管審核工作台")
             review_container = st.container()
             with review_container:
-                # 審核清單不進長期快取，確保即時
                 conn = get_db_connection()
                 review_df = pd.read_sql_query("SELECT c.*, i.batch_id, i.barcode, c.applicant, i.expiry_date FROM change_requests c JOIN return_items i ON c.item_id = i.id WHERE c.status = '審核中'", conn)
                 release_db_connection(conn)
@@ -371,7 +395,6 @@ else:
                         for i, row in reviewed.iterrows():
                             if row["同意"]:
                                 req = review_df.iloc[i]
-                                # --- 【功能同步修正】：按主管審核同意執行正式更新 ---
                                 if req['action'] == "刪除資料":
                                     cursor.execute("DELETE FROM return_items WHERE id = %s", (int(req['item_id']),))
                                 elif req['action'] == "數量更正":
